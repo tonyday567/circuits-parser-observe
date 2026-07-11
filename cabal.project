@@ -1,0 +1,15 @@
+packages:
+    .
+    ../circuits-parser
+    ../circuits
+    ../circuits-meter
+
+source-repository-package
+    type: git
+    location: https://github.com/tonyday567/markup-parse
+    tag: v0.2.2.0
+
+-- markup-parse v0.2.2.0 — flatparse era, pinned via git tag (pushed).
+-- Provides MarkupParse for the flatparse leg of the two-way benchmark.
+-- The current (circuits-parser-rewired) markup-parse is excluded from the plan
+-- (same package-id; already shown equivalent to Circuit.Markup).
