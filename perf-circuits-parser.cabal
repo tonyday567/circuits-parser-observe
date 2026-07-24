@@ -73,3 +73,17 @@ benchmark markup-meter
   hs-source-dirs: bench
   build-depends:
     circuits-meter >=0.1 && <0.2,
+
+test-suite machinarium
+  import: ghc-options-exe-stanza
+  import: ghc-options-stanza
+  import: bench-deps
+  default-language: GHC2024
+  type: exitcode-stdio-1.0
+  main-is: Machinarium.hs
+  hs-source-dirs:
+    test
+    bench
+  build-depends:
+    circuits-meter >=0.1 && <0.2,
+    containers >=0.6 && <0.9,
