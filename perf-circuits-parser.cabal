@@ -6,9 +6,9 @@ copyright: Tony Day (c) 2025
 category: performance
 author: Tony Day
 maintainer: tonyday567@gmail.com
-synopsis: Benchmark harness: Circuit.Markup vs MarkupParse, two ways.
+synopsis: Benchmark harness: Data.Markup vs MarkupParse, two ways.
 description:
-  Head-to-head benchmarks comparing the circuits-parser @Circuit.Markup@
+  Head-to-head benchmarks comparing the chart-svg @Data.Markup@
   layer against the standalone @markup-parse@ library, over a calibrated
   synthetic corpus plus real chart-svg SVG artifacts.
 
@@ -41,7 +41,7 @@ common bench-deps
   build-depends:
     base >=4.18 && <5,
     bytestring >=0.12 && <0.13,
-    circuits-parser >=0.1 && <0.2,
+    chart-svg >=0.8 && <0.9,
     containers >=0.6 && <0.9,
     deepseq >=1.5 && <1.6,
     markup-parse >=0.2 && <0.3,

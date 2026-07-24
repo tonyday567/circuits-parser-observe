@@ -8,7 +8,7 @@ cross-checking two measurement methods.
 All expose the same `markup_`/`tokenize`/`markdown_` API over strict `ByteString`
 with `Standard = Html | Xml`, but differ underneath:
 
-- **`Circuit.Markup`** (from `circuits-parser`) — markup layer chart-svg migrated to.
+- **`Data.Markup`** (from `chart-svg`) — markup layer migrated from circuits-parser.
 - **current `markup-parse`** — separate package, its own `Markup`/`Token` types,
   but depends on `circuits-parser` for the `Circuit.Parser` engine.
 - **`markup-parse` v0.2.2.0 (flatparse era)** — the last version before the
@@ -16,7 +16,7 @@ with `Standard = Html | Xml`, but differ underneath:
   `flatparse` + an internal `MarkupParse.Internal.FlatParse`. Pinned in
   `cabal.project` via `source-repository-package`.
 
-`Circuit.Markup` and current `markup-parse` share the `Trace Either (->)` engine
+`Data.Markup` and current `markup-parse` share the `Trace Either (->)` engine
 (hence byte-identical token counts and near-identical speed — they are NOT the
 same modules, just the same engine). The flatparse `v0.2.2.0` is the real
 baseline: a different engine entirely.
@@ -37,7 +37,7 @@ Within ~1-5% on all but the smallest input, identical rankings. On ~100 µs
 inputs the fixed-iteration mean reads a little high vs criterion's adaptive
 regression — expected. **circuits-meter holds up against its main competitor.**
 
-### 2. Circuit.Markup ≈ current markup-parse
+### 2. Data.Markup ≈ current markup-parse
 
 Both on the `Circuit.Parser` engine: ratio 0.98x-1.11x across all shapes/sizes.
 Byte-identical token counts (2659 on the wheel SVG). An earlier "35% slower"
@@ -47,7 +47,7 @@ result was a broken-harness artifact (wrong `Standard`, mis-forced results).
 
 On the 141 KB chart-wheel SVG (both produce 2659 tokens — same work):
 
-| stage    | flatparse v0.2.2.0 | Circuit.Markup | slowdown |
+| stage    | flatparse v0.2.2.0 | Data.Markup | slowdown |
 |----------|-------------------:|---------------:|---------:|
 | tokenize | ~0.5 ms            | ~14 ms         | **~27x** |
 | markup   | ~0.66 ms           | ~1.0 s         | **~1400x** |
@@ -64,7 +64,8 @@ vs 0.93 s). The gap scales with size and tree depth:
 
 The gather/tree-building stage is where the orders-of-magnitude gap opens; raw
 tokenize is "only" ~10-30x. This is the real cost of the flatparse→Circuit.Parser
-migration: sub-millisecond becomes ~1 second per large SVG.
+migration: sub-millisecond becomes ~1 second per large SVG. The `Data.Markup`
+modules were subsequently moved from `circuits-parser` to `chart-svg`.
 
 ## Pitfalls this harness encodes (learned the hard way)
 
