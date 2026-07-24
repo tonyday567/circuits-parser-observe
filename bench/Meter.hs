@@ -15,7 +15,6 @@ import Control.Monad (forM_)
 import Data.ByteString qualified as B
 import Text.Printf (printf)
 
-import Data.Markup qualified as DM
 import Circuit.Meter.Time (ticksN)
 import Corpus (ladder)
 import MarkupParse qualified as MP
@@ -38,13 +37,11 @@ timeUs n f a = do
 main :: IO ()
 main = do
   inputs <- loadInputs
-  printf "%-26s %-10s %12s %12s %10s\n" "input" "stage" "circuit-µs" "markup-µs" "ratio" :: IO ()
+  printf "%-26s %-10s %12s\n" "input" "stage" "markup-µs" :: IO ()
   forM_ inputs $ \(nm, bs) -> do
     -- tokenize
-    ct <- timeUs iterations (cmTokens DM.Html) bs
     mt <- timeUs iterations (mpTokens MP.Html) bs
-    printf "%-26s %-10s %12.2f %12.2f %9.2fx\n" nm "tokenize" ct mt (ct / mt) :: IO ()
+    printf "%-26s %-10s %12.2f\n" nm "tokenize" mt :: IO ()
     -- markup (full tree)
-    cm <- timeUs iterations (cmMarkupNodes DM.Html) bs
     mm <- timeUs iterations (mpMarkupNodes MP.Html) bs
-    printf "%-26s %-10s %12.2f %12.2f %9.2fx\n" nm "markup" cm mm (cm / mm) :: IO ()
+    printf "%-26s %-10s %12.2f\n" nm "markup" mm :: IO ()

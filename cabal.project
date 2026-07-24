@@ -1,6 +1,6 @@
 packages:
     .
-    ../chart-svg
+    ../markup-parse
     ../circuits-parser
     ../circuits
     ../circuits-meter
@@ -11,15 +11,5 @@ packages:
     ../harpie-numhask
     ../mealy
 
-source-repository-package
-    type: git
-    location: https://github.com/tonyday567/markup-parse
-    tag: v0.2.2.0
-
 allow-newer:
   tdigest:base
-
--- markup-parse v0.2.2.0 — flatparse era, pinned via git tag (pushed).
--- Provides MarkupParse for the flatparse leg of the two-way benchmark.
--- The current (circuits-parser-rewired) markup-parse is excluded from the plan
--- (same package-id; already shown equivalent to Data.Markup).
