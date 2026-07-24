@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Criterion harness for markup-parse, over the calibrated corpus plus a
--- real chart-svg SVG artifact. Companion to the circuits-meter harness
--- ('Meter.hs') — both measure the identical closures from 'Workload' over the
--- identical inputs, so the two methods can be cross-checked.
+-- | Criterion harness: markup-parse 0.3 vs markup-parse 0.2.2.0 (flatparse),
+-- over the calibrated corpus plus a real chart-svg SVG artifact. Companion to
+-- the circuits-meter harness ('Meter.hs') — both measure the identical closures
+-- from 'Workload' over the identical inputs.
 module Main (main) where
 
 import Control.DeepSeq (force)
@@ -13,6 +13,7 @@ import Data.ByteString qualified as B
 
 import Corpus (ladder)
 import MarkupParse qualified as MP
+import MarkupParseLegacy qualified as MPL
 import Workload
 
 -- | Inputs: calibrated corpus (Xml) + a real chart-svg document.
@@ -30,10 +31,14 @@ main = do
         nm
         [ bgroup
             "tokenize"
-            [bench "markup-parse" $ whnf (mpTokens MP.Html) bs]
+            [ bench "markup-parse-0.3" $ whnf (mpTokens MP.Html) bs,
+              bench "markup-parse-0.2.2.0" $ whnf (mplTokens MPL.Html) bs
+            ]
         , bgroup
             "markup"
-            [bench "markup-parse" $ whnf (mpMarkupNodes MP.Html) bs]
+            [ bench "markup-parse-0.3" $ whnf (mpMarkupNodes MP.Html) bs,
+              bench "markup-parse-0.2.2.0" $ whnf (mplMarkupNodes MPL.Html) bs
+            ]
         ]
     | (nm, bs) <- inputs
     ]

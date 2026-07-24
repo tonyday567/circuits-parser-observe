@@ -1,6 +1,7 @@
 packages:
     .
     ../markup-parse
+    ../markup-parse-legacy
     ../circuits-parser
     ../circuits
     ../circuits-meter

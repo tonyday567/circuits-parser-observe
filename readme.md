@@ -1,12 +1,16 @@
 # perf-circuits-parser
 
-Benchmark harness for the markup-parsing hot path in `markup-parse`, over a
-calibrated synthetic corpus plus real chart-svg SVG artifacts.
+Benchmark harness comparing `markup-parse` 0.3 (circuits-parser engine) with
+`markup-parse` 0.2.2.0 (flatparse engine), over a calibrated synthetic corpus
+plus real chart-svg SVG artifacts.
 
-## The parser
+## The two parsers
 
-`markup-parse` parses and prints a subset of common XML & HTML structured data,
-from and to strict bytestrings, on top of the `circuits-parser` engine.
+- **`markup-parse` 0.3** — current, on the `circuits-parser` engine.
+- **`markup-parse` 0.2.2.0** — last flatparse-backed release (`git tag v0.2.2.0`).
+
+Both expose the same `markup`/`tokenize`/`markdown` API over strict
+`ByteString` with `Standard = Html | Xml`.
 
 ## The two harnesses
 
@@ -15,6 +19,17 @@ Both measure identical closures (`bench/Workload.hs`) over identical inputs
 
 - `markup-criterion` — criterion.
 - `markup-meter` — circuits-meter's `ticksN`.
+
+## Latest run (GHC 9.14.1, -O1, aarch64)
+
+On the 141 KB chart-wheel SVG, parsed as `Html`:
+
+| stage    | markup-parse 0.3 | markup-parse 0.2.2.0 | slowdown |
+|----------|-----------------:|---------------------:|---------:|
+| tokenize | ~87 ms           | ~0.50 ms             | **~175x** |
+| markup   | ~89 ms           | ~0.65 ms             | **~138x** |
+
+Both harnesses agree within ~1–3%.
 
 ## Running
 

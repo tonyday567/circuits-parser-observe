@@ -1,12 +1,6 @@
 -- | circuits-meter harness: the same Workload closures over the same Corpus
 -- inputs as the criterion harness ('Main.hs'), measured with
 -- 'Circuit.Meter.Time.ticksN' instead of criterion.
---
--- Purpose: cross-check circuits-meter's numbers against criterion's, and
--- exercise the circuits-meter API on a real workload (dogfooding it against
--- its main competitor). 'ticksN' handles the same three pitfalls criterion
--- does: NF forcing (@evaluate . force@), float-out prevention (@hold@ +
--- NOINLINE), and warmup (100 iterations).
 module Main (main) where
 
 import Control.DeepSeq (force)
@@ -18,6 +12,7 @@ import Text.Printf (printf)
 import Circuit.Meter.Time (ticksN)
 import Corpus (ladder)
 import MarkupParse qualified as MP
+import MarkupParseLegacy qualified as MPL
 import Workload
 
 iterations :: Int
@@ -37,11 +32,13 @@ timeUs n f a = do
 main :: IO ()
 main = do
   inputs <- loadInputs
-  printf "%-26s %-10s %12s\n" "input" "stage" "markup-µs" :: IO ()
+  printf "%-26s %-10s %12s %12s %10s\n" "input" "stage" "mp-0.3-µs" "mp-0.2.2.0-µs" "ratio" :: IO ()
   forM_ inputs $ \(nm, bs) -> do
     -- tokenize
-    mt <- timeUs iterations (mpTokens MP.Html) bs
-    printf "%-26s %-10s %12.2f\n" nm "tokenize" mt :: IO ()
+    ct <- timeUs iterations (mpTokens MP.Html) bs
+    mt <- timeUs iterations (mplTokens MPL.Html) bs
+    printf "%-26s %-10s %12.2f %12.2f %9.2fx\n" nm "tokenize" ct mt (ct / mt) :: IO ()
     -- markup (full tree)
-    mm <- timeUs iterations (mpMarkupNodes MP.Html) bs
-    printf "%-26s %-10s %12.2f\n" nm "markup" mm :: IO ()
+    cm <- timeUs iterations (mpMarkupNodes MP.Html) bs
+    mm <- timeUs iterations (mplMarkupNodes MPL.Html) bs
+    printf "%-26s %-10s %12.2f %12.2f %9.2fx\n" nm "markup" cm mm (cm / mm) :: IO ()
