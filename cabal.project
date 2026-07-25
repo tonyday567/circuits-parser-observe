@@ -10,7 +10,7 @@ packages:
     ../numhask-diff
     ../harpie
     ../harpie-numhask
-    ../mealy
+    ../process-stats
 
 allow-newer:
   tdigest:base

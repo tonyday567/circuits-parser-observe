@@ -1,21 +1,21 @@
 cabal-version: 3.0
-name: perf-circuits-parser
+name: circuits-parser-observe
 version: 0.1.0.0
 license: BSD-3-Clause
 copyright: Tony Day (c) 2025
 category: performance
 author: Tony Day
 maintainer: tonyday567@gmail.com
-synopsis: Benchmark harness for markup-parse.
+synopsis: Machine observation for the circuits-parser substrate
 description:
-  Benchmarks for the @markup-parse@ markup layer, over a calibrated
-  synthetic corpus plus real chart-svg SVG artifacts.
+  Inward study of the circuits-parser substrate: measurement, gap diagnosis,
+  and machine specification. This package is disconnected from the core
+  @circuits-parser@ library so that in-house dev tools and measurement
+  dependencies do not burden the published library build.
 
-  Two harnesses measure identical closures over identical inputs:
-
-  * @markup-criterion@ — the criterion baseline.
-  * @markup-meter@ — the same work measured with circuits-meter's @ticksN@,
-    to cross-check circuits-meter against its main competitor.
+  The benchmark stanzas remain as external measurement plumbing (comparisons
+  with other libraries); the @circuits-parser-observe@ executable is the
+  library's own machine observation.
 
 build-type: Simple
 tested-with: ghc ==9.14.1
@@ -45,6 +45,19 @@ common bench-deps
     markup-parse >=0.3 && <0.4,
     markup-parse-legacy >=0.2 && <0.3,
     these >=1.2 && <1.3,
+
+executable circuits-parser-observe
+  import: ghc-options-exe-stanza
+  import: ghc-options-stanza
+  default-language: GHC2024
+  main-is: observe.hs
+  hs-source-dirs: app
+  build-depends:
+    base >=4.18 && <5,
+    bytestring >=0.12 && <0.13,
+    circuits-parser >=0.1 && <0.2,
+    circuits-meter >=0.1 && <0.2,
+    deepseq >=1.5 && <1.6,
 
 benchmark markup-criterion
   import: ghc-options-exe-stanza
