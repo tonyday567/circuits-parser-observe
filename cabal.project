@@ -12,5 +12,3 @@ packages:
     ../harpie-numhask
     ../process-stats
 
-allow-newer:
-  tdigest:base
