@@ -1,7 +1,7 @@
 packages:
     .
     ../markup-parse
-    ../markup-parse-legacy
+    /Users/tonyday567/other/markup-parse-legacy
     ../circuits-parser
     ../circuits
     ../circuits-meter
