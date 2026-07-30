@@ -1,5 +1,5 @@
 cabal-version: 3.0
-name: circuits-parser-observe
+name: circuits-parser-machina
 version: 0.1.0.0
 license: BSD-3-Clause
 copyright: Tony Day (c) 2025
@@ -14,7 +14,7 @@ description:
   dependencies do not burden the published library build.
 
   The benchmark stanzas remain as external measurement plumbing (comparisons
-  with other libraries); the @circuits-parser-observe@ executable is the
+  with other libraries); the @circuits-parser-machina@ executable is the
   library's own machine observation.
 
 build-type: Simple
@@ -46,11 +46,11 @@ common bench-deps
     markup-parse-legacy >=0.2 && <0.3,
     these >=1.2 && <1.3,
 
-executable circuits-parser-observe
+executable circuits-parser-machina
   import: ghc-options-exe-stanza
   import: ghc-options-stanza
   default-language: GHC2024
-  main-is: observe.hs
+  main-is: machina.hs
   hs-source-dirs: app
   build-depends:
     base >=4.18 && <5,

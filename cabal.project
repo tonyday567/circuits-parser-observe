@@ -1,14 +1,14 @@
 packages:
     .
-    ../markup-parse
+    ../../haskell/markup-parse
     /Users/tonyday567/other/markup-parse-legacy
-    ../circuits-parser
-    ../circuits
-    ../circuits-meter
-    ../numhask
-    ../numhask-space
-    ../numhask-diff
-    ../harpie
-    ../harpie-numhask
-    ../process-stats
+    ../../haskell/circuits-parser
+    ../../haskell/circuits
+    ../../haskell/circuits-meter
+    ../../haskell/numhask
+    ../../haskell/numhask-space
+    ../../haskell/numhask-diff
+    ../../haskell/harpie
+    ../../haskell/harpie-numhask
+    ../../haskell/process-stats
 
