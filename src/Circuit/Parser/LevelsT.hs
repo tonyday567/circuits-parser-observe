@@ -47,10 +47,11 @@ where
 import Circuit qualified as C
 import Circuit.Channel (Traced (..))
 import Circuit.Parser
-  ( Parser (..),
+  ( Parser,
     Uncons,
     runParser,
   )
+import Circuit.Parser.Syntax (loopToParser)
 import Control.Applicative (Alternative (..))
 import Control.Arrow (Kleisli (..))
 import Control.Category ((.))
@@ -204,7 +205,7 @@ altLevels ::
   Parser (LevelsT m) f s a ->
   Parser (LevelsT m) f s a ->
   Parser (LevelsT m) f s a
-altLevels p1 p2 = Parser $ C.trace $ C.Lift $ Kleisli $ \case
+altLevels p1 p2 = loopToParser $ C.trace $ C.Lift $ Kleisli $ \case
   Right s -> leftSuccesses s `altLevelsT` pure (Left s)
   Left s -> Right <$> runParser p2 s
   where

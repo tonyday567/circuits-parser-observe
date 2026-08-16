@@ -40,11 +40,12 @@ where
 import Circuit qualified as C
 import Circuit.Channel (Traced (..))
 import Circuit.Parser
-  ( Parser (..),
+  ( Parser,
     Uncons,
     runParser,
     string,
   )
+import Circuit.Parser.Syntax (loopToParser)
 import Control.Applicative (Alternative, empty)
 import Control.Arrow (Kleisli (..))
 import Control.Monad (MonadPlus)
@@ -107,7 +108,7 @@ altB ::
   Parser (BranchingM m) f s a ->
   Parser (BranchingM m) f s a ->
   Parser (BranchingM m) f s a
-altB p1 p2 = Parser $ C.trace $ C.Lift $ Kleisli $ \case
+altB p1 p2 = loopToParser $ C.trace $ C.Lift $ Kleisli $ \case
   Right s -> leftSuccesses s `interleave` pure (Left s)
   Left s -> Right <$> runParser p2 s
   where
