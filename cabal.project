@@ -4,11 +4,11 @@ packages:
     /Users/tonyday567/other/markup-parse-legacy
     ../../haskell/circuits-parser
     ../../haskell/circuits
+    ../../haskell/circuits-diff
+    ../../haskell/circuits-mat
     ../../haskell/circuits-meter
     ../../haskell/numhask
     ../../haskell/numhask-space
-    ../../haskell/numhask-diff
     ../../haskell/harpie
-    ../../haskell/harpie-numhask
     ../../haskell/circuits-stats
-
+    /Users/tonyday567/other/logict
