@@ -87,7 +87,7 @@ instance Add.Additive Token where
 -- [Nothing]
 --
 -- >>> fold abProcess "aab"
--- Nothing
+-- Just Nothing
 abProcess :: Process Char (Maybe String)
 abProcess = Process inject step id
   where
