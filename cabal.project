@@ -10,5 +10,5 @@ packages:
     ../../haskell/numhask-diff
     ../../haskell/harpie
     ../../haskell/harpie-numhask
-    ../../haskell/process-stats
+    ../../haskell/circuits-stats
 
