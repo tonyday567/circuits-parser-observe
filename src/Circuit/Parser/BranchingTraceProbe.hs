@@ -45,7 +45,7 @@ import Circuit.Parser
     runParser,
     string,
   )
-import Circuit.Parser.Syntax (loopToParser)
+import Circuit.Parser.LoopAdapter (loopToParser)
 import Control.Applicative (Alternative, empty)
 import Control.Arrow (Kleisli (..))
 import Control.Monad (MonadPlus)

@@ -51,7 +51,7 @@ import Circuit.Parser
     Uncons,
     runParser,
   )
-import Circuit.Parser.Syntax (loopToParser)
+import Circuit.Parser.LoopAdapter (loopToParser)
 import Control.Applicative (Alternative (..))
 import Control.Arrow (Kleisli (..))
 import Control.Category ((.))

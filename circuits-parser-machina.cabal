@@ -54,6 +54,7 @@ library
     Circuit.Parser.BranchingTraceProbe
     Circuit.Parser.DiffCompiler
     Circuit.Parser.LevelsT
+    Circuit.Parser.LoopAdapter
     Circuit.Parser.Matrix
     Circuit.Parser.ProcessProbe
     Circuit.Parser.Semiring
