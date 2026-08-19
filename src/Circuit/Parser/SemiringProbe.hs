@@ -1,25 +1,12 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 -- | Semiring-weighted interpretation of 'Loop Either' parsers.
 --
--- This module integrates the cyclic semiring trace into the generic
--- 'Circuit.Layer.bind' fold.  The source parser is built over a constrained
--- Kleisli arrow 'CKleisli m Eq' so that feedback states can carry an 'Eq'
--- constraint; the target 'SemiringKleisli r' also has 'Ob = Eq'.  The
--- dictionary transformer between them is then the identity.
---
--- The payoff is that 'runSemiringParser' is literally 'C.bind phi emb': the
--- same parser syntax folds into a weighted relation whose 'Either' trace sums
--- over all paths through a cyclic choice loop.
---
--- The semiring vocabulary is 'numhask''s: 'Additive' / 'Multiplicative' /
--- 'StarSemiring'.  Carrier-dependent normalization mirrors
--- 'NumHask.Free.StarSemiring.kleeneSimplify': idempotent carriers (Kleene
--- algebras) merge duplicate outputs, counting carriers keep them.
+-- This module is a smoke test / probe for the unconstrained circuits core.
+-- It interprets parser syntax built over a local 'Kleisli' wrapper into a
+-- weighted relation carrier.  'Eq' constraints are carried locally by the
+-- runners, not by the category class hierarchy.
 module Circuit.Parser.SemiringProbe
   ( -- * Carriers and source monad
     Count (..),
@@ -27,10 +14,7 @@ module Circuit.Parser.SemiringProbe
     MinPlus (..),
     Weighted (..),
 
-    -- * Constrained Kleisli source
-    CKleisli (..),
-
-    -- * Parser over constrained source
+    -- * Parser over a Kleisli source
     EqParser (..),
     runEqParser,
     next,
@@ -74,28 +58,81 @@ module Circuit.Parser.SemiringProbe
 where
 
 import Circuit qualified as C
-import Circuit.Category (Category (..), ObDict (..), (.>))
+import Circuit.Category (Category, id, (.), (.>))
 import Circuit.Channel (Channel (..), Strength (..), Traced (..))
 import Circuit.Parser (Uncons (..))
+import Circuit.Parser.Matrix (fromLists, starMatrix, toLists)
 import Circuit.Parser.Semiring
   ( Count (..),
     Dual2 (..),
     MinPlus (..),
     Weighted (..),
   )
-import Circuit.Tensor (Action (..), Tensor (..))
+import Control.Arrow (Kleisli (..), runKleisli)
 import Control.Monad (MonadPlus (..), (<=<))
 import Data.Bifunctor (first)
 import Data.Bool (bool)
-import Data.Kind (Constraint, Type)
 import Data.List (elemIndex, sortOn)
 import Data.Maybe (fromMaybe)
 import Data.These (These (..), these)
-import Circuit.Parser.Matrix (fromLists, starMatrix, toLists)
 import NumHask.Algebra.Additive qualified as Add
 import NumHask.Algebra.Multiplicative qualified as Mul
 import NumHask.Algebra.Ring qualified as Ring
 import Prelude hiding (id, (.))
+
+-- ---------------------------------------------------------------------------
+-- Local Kleisli wrapper (avoids the overlapping 'Traced Either (Kleisli IO)'
+-- instance in the circuits core).
+-- ---------------------------------------------------------------------------
+
+-- | A thin wrapper around 'Kleisli' so that this module can supply its own
+-- non-overlapping structural instances.
+newtype PK m a b = PK {unPK :: Kleisli m a b}
+
+instance (Monad m) => Category (PK m) where
+  id = PK (Kleisli pure)
+  PK (Kleisli f) . PK (Kleisli g) = PK (Kleisli (f <=< g))
+
+instance (Monad m) => Channel Either (PK m) where
+  assoc =
+    PK $
+      Kleisli $
+        pure . \case
+          Left (Left a) -> Left a
+          Left (Right b) -> Right (Left b)
+          Right c -> Right (Right c)
+  assoc' =
+    PK $
+      Kleisli $
+        pure . \case
+          Left a -> Left (Left a)
+          Right (Left b) -> Left (Right b)
+          Right (Right c) -> Right c
+  slide =
+    PK $
+      Kleisli $
+        pure . \case
+          Left a -> Right (Left a)
+          Right (Left b) -> Left b
+          Right (Right c) -> Right (Right c)
+
+instance (Monad m) => Strength Either (PK m) where
+  strength (PK (Kleisli f)) =
+    PK $
+      Kleisli $ \case
+        Left a -> pure (Left a)
+        Right b -> Right <$> f b
+
+instance (Monad m) => Traced Either (PK m) where
+  trace (PK (Kleisli f)) =
+    PK $
+      Kleisli $
+        \b -> go (Right b)
+    where
+      go x =
+        f x >>= \case
+          Right c -> pure c
+          Left a -> go (Left a)
 
 -- ---------------------------------------------------------------------------
 -- Carrier-dependent normalization (K&W quotient discipline)
@@ -132,88 +169,25 @@ instance Normalizable Dual2 where normalize = delOnly
 instance Normalizable (MinPlus Double) where normalize = dupDel
 
 -- ---------------------------------------------------------------------------
--- Constrained Kleisli arrow
+-- Parser over the Kleisli source
 -- ---------------------------------------------------------------------------
 
--- | 'Kleisli' arrows whose objects must satisfy a constraint @c@.
---
--- This is the least-invasive way to make the parser source category carry a
--- non-trivial object constraint: the feedback state @s@ in a 'Loop.Knot' now
--- comes with 'Eq s' evidence, which the target semiring category needs.
-newtype CKleisli m (c :: Type -> Constraint) a b = CKleisli
-  { runCKleisli :: a -> m b
-  }
-
-instance (Monad m) => Category (CKleisli m c) where
-  type Ob (CKleisli m c) a = c a
-  id = CKleisli pure
-  CKleisli f . CKleisli g = CKleisli (f <=< g)
-
-instance (Monad m) => Channel (,) (CKleisli m Eq) where
-  assoc = CKleisli $ pure . \((a, b), c) -> (a, (b, c))
-  assoc' = CKleisli $ pure . \(a, (b, c)) -> ((a, b), c)
-  slide = CKleisli $ pure . \(a, (b, c)) -> (b, (a, c))
-  withTensorOb ObDict ObDict k = k
-
-instance (Monad m) => Channel Either (CKleisli m Eq) where
-  assoc =
-    CKleisli $
-      pure . \case
-        Left (Left a) -> Left a
-        Left (Right b) -> Right (Left b)
-        Right c -> Right (Right c)
-  assoc' =
-    CKleisli $
-      pure . \case
-        Left a -> Left (Left a)
-        Right (Left b) -> Left (Right b)
-        Right (Right c) -> Right c
-  slide =
-    CKleisli $
-      pure . \case
-        Left a -> Right (Left a)
-        Right (Left b) -> Left b
-        Right (Right c) -> Right (Right c)
-  withTensorOb ObDict ObDict k = k
-
-instance (Monad m) => Strength (,) (CKleisli m Eq) where
-  strength (CKleisli f) = CKleisli $ \(a, b) -> f b >>= \c -> pure (a, c)
-  withStrengthOb ObDict ObDict ObDict k = k
-
-instance (Monad m) => Strength Either (CKleisli m Eq) where
-  strength (CKleisli f) = CKleisli $ \case
-    Left a -> pure (Left a)
-    Right b -> f b >>= \c -> pure (Right c)
-  withStrengthOb ObDict ObDict ObDict k = k
-
-instance (Monad m) => Traced Either (CKleisli m Eq) where
-  trace (CKleisli f) = CKleisli $ \b -> go (Right b)
-    where
-      go x =
-        f x >>= \case
-          Right c -> pure c
-          Left a -> go (Left a)
-
--- ---------------------------------------------------------------------------
--- Parser over the constrained source
--- ---------------------------------------------------------------------------
-
--- | Parser syntax over @Loop Either (CKleisli m Eq)@.
---
--- The 'Eq' constraint is paid only when the parser will be interpreted through
--- a target that needs equality on feedback states (e.g. cyclic semiring
--- parsing).  The standard 'Parser' over 'Kleisli m' remains unconstrained.
+-- | Parser syntax over @Loop Either (PK m)@.
 newtype EqParser m f s a = EqParser
-  { unEqParser :: C.Loop Either (CKleisli m Eq) f (These a f)
+  { unEqParser :: C.Loop Either (PK m) f (These a f)
   }
+
+-- | Run a 'Loop' built over the local Kleisli wrapper.
+runLoop :: (Monad m) => C.Loop Either (PK m) x y -> x -> m y
+runLoop l = runKleisli (unPK (C.run l))
 
 -- | Run a parser in the base monad.
-runEqParser :: forall m f s a. (Monad m, Eq f, Eq a) => EqParser m f s a -> f -> m (These a f)
-runEqParser p = runCKleisli (C.run (unEqParser p))
+runEqParser :: forall m f s a. (Monad m) => EqParser m f s a -> f -> m (These a f)
+runEqParser p = runLoop (unEqParser p)
 
 -- | Consume and return the next element, or 'That' if the stream is empty.
 next :: forall m f s. (Monad m, Uncons f s) => EqParser m f s s
-next = EqParser $ C.Lift $ CKleisli $ \f -> pure (uncons f)
+next = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (uncons f)
 
 -- | Apply a predicate to the result of 'uncons'.
 guardThese :: (Uncons f s) => (s -> Bool) -> f -> These s f -> These s f
@@ -229,14 +203,14 @@ isThat = these (const False) (const True) (\_ _ -> False)
 
 -- | Consume one element if it satisfies the predicate.
 satisfy :: forall m f s. (Monad m, Uncons f s) => (s -> Bool) -> EqParser m f s s
-satisfy p = EqParser $ C.Lift $ CKleisli $ \f -> pure (guardThese p f (uncons f))
+satisfy p = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (guardThese p f (uncons f))
 
 -- | Match a specific element.
 char :: forall m f s. (Monad m, Uncons f s, Eq s) => s -> EqParser m f s s
 char c = satisfy (== c)
 
 -- | Match a sequence of elements.
-string :: forall m f s. (Monad m, Uncons f s, Eq s, Eq f) => [s] -> EqParser m f s [s]
+string :: forall m f s. (Monad m, Uncons f s, Eq s) => [s] -> EqParser m f s [s]
 string = go []
   where
     go :: [s] -> [s] -> EqParser m f s [s]
@@ -251,7 +225,7 @@ satisfyW ::
   (Uncons f s, Add.Additive r, Eq r) =>
   (s -> r) ->
   EqParser (Weighted r) f s s
-satisfyW w = EqParser $ C.Lift $ CKleisli $ \f ->
+satisfyW w = EqParser $ C.Lift $ PK $ Kleisli $ \f ->
   Weighted $ case uncons f of
     That _ -> []
     This s -> [(This s, w s) | w s /= Add.zero]
@@ -269,7 +243,7 @@ charW w c = satisfyW (\s -> if s == c then w s else Add.zero)
 -- | Match a sequence of elements, weighted.
 stringW ::
   forall f s r.
-  (Uncons f s, Eq s, Eq f, Add.Additive r, Eq r, Mul.Multiplicative r) =>
+  (Uncons f s, Eq s, Add.Additive r, Eq r, Mul.Multiplicative r) =>
   (s -> r) ->
   [s] ->
   EqParser (Weighted r) f s [s]
@@ -281,45 +255,40 @@ stringW w = go []
 
 -- | Succeed only at the end of input.
 endOfInput :: forall m f s. (Monad m, Uncons f s) => EqParser m f s ()
-endOfInput = EqParser $ C.Lift $ CKleisli $ \f ->
+endOfInput = EqParser $ C.Lift $ PK $ Kleisli $ \f ->
   pure $ case uncons @f @s f of
     That _ -> These () f
     _ -> That f
 
--- | Functorial map.  The result type must be 'Eq' because the underlying
--- traced category carries an object-level equality constraint.
+-- | Functorial map.
 mapP ::
-  (Monad m, Eq f, Eq a, Eq b) =>
+  (Monad m) =>
   (a -> b) ->
   EqParser m f s a ->
   EqParser m f s b
-mapP g (EqParser p) = EqParser (p .> C.Lift (CKleisli (pure . first g)))
+mapP g (EqParser p) = EqParser (p .> C.Lift (PK (Kleisli (pure . first g))))
 
 -- | Lift a pure value into a parser that consumes nothing.
-pureP :: (Monad m, Eq f, Eq a) => a -> EqParser m f s a
-pureP a = EqParser $ C.Lift $ CKleisli $ \f -> pure (These a f)
+pureP :: (Monad m) => a -> EqParser m f s a
+pureP a = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (These a f)
 
 -- | Sequential composition that threads the stream and pairs the results.
---
--- This is the applicative spine without the function-valued intermediate
--- object that makes a generic '<*>' impossible under an 'Eq' object
--- constraint.
 pairP ::
   forall m f s a b.
-  (Monad m, Uncons f s, Eq f, Eq a, Eq b) =>
+  (Monad m, Uncons f s) =>
   EqParser m f s a ->
   EqParser m f s b ->
   EqParser m f s (a, b)
-pairP (EqParser p) (EqParser q) = EqParser $ C.Lift $ CKleisli $ \s -> do
-  runCKleisli (C.run p) s >>= \case
+pairP (EqParser p) (EqParser q) = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
+  runLoop p s >>= \case
     That s' -> pure (That s')
     This a ->
-      runCKleisli (C.run q) (nil @f @s) >>= \case
+      runLoop q (nil @f @s) >>= \case
         That _ -> pure (That s)
         This b -> pure (These (a, b) (nil @f @s))
         These b s'' -> pure (These (a, b) s'')
     These a s' ->
-      runCKleisli (C.run q) s' >>= \case
+      runLoop q s' >>= \case
         That _ -> pure (That s)
         This b -> pure (These (a, b) (nil @f @s))
         These b s'' -> pure (These (a, b) s'')
@@ -328,42 +297,40 @@ pairP (EqParser p) (EqParser q) = EqParser $ C.Lift $ CKleisli $ \s -> do
 -- succeeds, so the intermediate value never appears as a feedback object.
 bindP ::
   forall m f s a b.
-  (Monad m, Uncons f s, Eq f, Eq a, Eq b) =>
+  (Monad m, Uncons f s) =>
   EqParser m f s a ->
   (a -> EqParser m f s b) ->
   EqParser m f s b
-bindP (EqParser m) k = EqParser $ C.Lift $ CKleisli $ \s -> do
-  runCKleisli (C.run m) s >>= \case
+bindP (EqParser m) k = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
+  runLoop m s >>= \case
     That s' -> pure (That s')
-    This a -> runCKleisli (C.run (unEqParser (k a))) (nil @f @s)
-    These a s' -> runCKleisli (C.run (unEqParser (k a))) s'
+    This a -> runLoop (unEqParser (k a)) (nil @f @s)
+    These a s' -> runLoop (unEqParser (k a)) s'
 
 -- | A parser that always fails without consuming input.
-empty :: (MonadPlus m, Eq f, Eq a) => EqParser m f s a
-empty = EqParser $ C.Lift $ CKleisli $ const mzero
+empty :: (MonadPlus m) => EqParser m f s a
+empty = EqParser $ C.Lift $ PK $ Kleisli $ const mzero
 
 -- | Traced choice: collect successes from both branches.
---
--- Because the source category is constrained by 'Eq', the result type must
--- also be 'Eq' here.  The feedback state is just the stream, so the cyclic
--- trace can compare it.
 --
 -- The branching is expressed with 'mplus', so this works for any
 -- 'MonadPlus' source (in particular the list monad used by
 -- 'runSemiringParser').
 (<|>) ::
   forall m f s a.
-  (MonadPlus m, Uncons f s, Eq f, Eq a) =>
+  (MonadPlus m, Uncons f s) =>
   EqParser m f s a ->
   EqParser m f s a ->
   EqParser m f s a
-EqParser p1 <|> EqParser p2 = EqParser $ C.trace $ C.Lift $ CKleisli $ \case
+EqParser p1 <|> EqParser p2 = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
   Right s -> do
-    res <- runCKleisli (C.run p1) s
+    res <- runLoop p1 s
     case res of
       That s' -> pure (Left s')
       _ -> pure (Right res) `mplus` pure (Left s)
-  Left s -> Right <$> runCKleisli (C.run p2) s
+  Left s -> Right <$> runLoop p2 s
+
+infixr 3 <|>
 
 -- | Zero or more repetitions.
 --
@@ -372,14 +339,14 @@ EqParser p1 <|> EqParser p2 = EqParser $ C.trace $ C.Lift $ CKleisli $ \case
 -- with one more element.  This keeps every derivation counted exactly once.
 many ::
   forall m f s a.
-  (MonadPlus m, Uncons f s, Eq f, Eq a) =>
+  (MonadPlus m, Uncons f s) =>
   EqParser m f s a ->
   EqParser m f s [a]
-many p = EqParser $ C.trace $ C.Lift $ CKleisli $ \case
+many p = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
   Right f -> pure (Left (f, []))
   Left (f, acc) ->
     let exit = pure (Right (These (reverse acc) f))
-     in runCKleisli (C.run (unEqParser p)) f >>= \case
+     in runLoop (unEqParser p) f >>= \case
           That _ -> exit
           This a ->
             let acc' = a : acc
@@ -391,15 +358,15 @@ many p = EqParser $ C.trace $ C.Lift $ CKleisli $ \case
 -- | One or more repetitions.
 some ::
   forall m f s a.
-  (MonadPlus m, Uncons f s, Eq f, Eq a) =>
+  (MonadPlus m, Uncons f s) =>
   EqParser m f s a ->
   EqParser m f s [a]
 some p = mapP (uncurry (:)) (pairP p (many p))
 
 -- | Attempt a parser. If it fails with 'That', restore the original stream.
-try :: forall m f s a. (Monad m, Uncons f s, Eq f, Eq a) => EqParser m f s a -> EqParser m f s a
-try (EqParser p) = EqParser $ C.Lift $ CKleisli $ \s -> do
-  res <- runCKleisli (C.run p) s
+try :: forall m f s a. (Monad m, Uncons f s) => EqParser m f s a -> EqParser m f s a
+try (EqParser p) = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
+  res <- runLoop p s
   pure $ case res of
     That _ -> That s
     result -> result
@@ -414,74 +381,13 @@ newtype SemiringKleisli r a b = SemiringKleisli
   { runSemiringKleisli :: a -> [(b, r)]
   }
 
-instance (Mul.Multiplicative r, Normalizable r) => Category (SemiringKleisli r) where
-  type Ob (SemiringKleisli r) a = Eq a
-  id = SemiringKleisli $ \a -> [(a, Mul.one)]
-  SemiringKleisli g . SemiringKleisli f =
-    SemiringKleisli $ \a ->
-      normalize
-        [ (c, w1 Mul.* w2)
-        | (b, w1) <- f a,
-          (c, w2) <- g b
-        ]
-
-instance (Mul.Multiplicative r, Normalizable r) => Channel (,) (SemiringKleisli r) where
-  assoc = SemiringKleisli $ \((a, b), c) -> [((a, (b, c)), Mul.one)]
-  assoc' = SemiringKleisli $ \(a, (b, c)) -> [(((a, b), c), Mul.one)]
-  slide = SemiringKleisli $ \(a, (b, c)) -> [((b, (a, c)), Mul.one)]
-  withTensorOb ObDict ObDict k = k
-
-instance (Mul.Multiplicative r, Normalizable r) => Channel Either (SemiringKleisli r) where
-  assoc = SemiringKleisli $ \case
-    Left (Left a) -> [(Left a, Mul.one)]
-    Left (Right b) -> [(Right (Left b), Mul.one)]
-    Right c -> [(Right (Right c), Mul.one)]
-  assoc' = SemiringKleisli $ \case
-    Left a -> [(Left (Left a), Mul.one)]
-    Right (Left b) -> [(Left (Right b), Mul.one)]
-    Right (Right c) -> [(Right c, Mul.one)]
-  slide = SemiringKleisli $ \case
-    Left a -> [(Right (Left a), Mul.one)]
-    Right (Left b) -> [(Left b, Mul.one)]
-    Right (Right c) -> [(Right (Right c), Mul.one)]
-  withTensorOb ObDict ObDict k = k
-
-instance (Mul.Multiplicative r, Normalizable r) => Strength (,) (SemiringKleisli r) where
-  strength f = SemiringKleisli $ \(a, b) ->
-    [ ((a, c), w) | (c, w) <- runSemiringKleisli f b
-    ]
-  withStrengthOb ObDict ObDict ObDict k = k
-
-instance (Mul.Multiplicative r, Normalizable r) => Strength Either (SemiringKleisli r) where
-  strength f = SemiringKleisli $ \case
-    Left a -> [(Left a, Mul.one)]
-    Right b ->
-      [ (Right c, w) | (c, w) <- runSemiringKleisli f b
-      ]
-  withStrengthOb ObDict ObDict ObDict k = k
-
-instance (Mul.Multiplicative r, Normalizable r) => Tensor (,) (SemiringKleisli r) where
-  par f g = SemiringKleisli $ \(a, c) ->
-    [ ((b, d), w1 Mul.* w2)
-    | (b, w1) <- runSemiringKleisli f a,
-      (d, w2) <- runSemiringKleisli g c
-    ]
-  unitl = SemiringKleisli $ \((), a) -> [(a, Mul.one)]
-  unitl' = SemiringKleisli $ \a -> [(((), a), Mul.one)]
-  unitr = SemiringKleisli $ \(a, ()) -> [(a, Mul.one)]
-  unitr' = SemiringKleisli $ \a -> [((a, ()), Mul.one)]
-
-instance (Mul.Multiplicative r, Normalizable r) => Action (,) (SemiringKleisli r) where
-  swap = SemiringKleisli $ \(a, b) -> [((b, a), Mul.one)]
-
 sumR :: (Add.Additive r) => [r] -> r
 sumR = foldr (Add.+) Add.zero
 
 -- ---------------------------------------------------------------------------
 -- Square matrix toolbox for Kleene star
 -- ---------------------------------------------------------------------------
---
--- The canonical matrix carrier lives in "Circuit.Mat.Dense".
+
 feedbackClosure ::
   (Eq a) =>
   (a -> [(a, r)]) ->
@@ -499,48 +405,46 @@ feedbackClosure edges = go []
 -- | Cyclic trace for 'SemiringKleisli'.
 --
 -- Computes the reflexive-transitive closure of the feedback-to-feedback graph
--- over a 'StarSemiring'.  This is now the lawful 'Traced Either' instance for
--- the category, enabled by the constrained-bind refactor.
+-- over a 'StarSemiring'.  Equality constraints are required only on the
+-- 'Either'-wrapped channel types.
 traceCyclic ::
   forall r a b c.
-  (Ring.StarSemiring r, Normalizable r, Eq a, Eq b, Eq c) =>
+  (Ring.StarSemiring r, Normalizable r, Eq (Either a b), Eq (Either a c)) =>
   SemiringKleisli r (Either a b) (Either a c) ->
   SemiringKleisli r b c
-traceCyclic (SemiringKleisli f) = SemiringKleisli $ \b0 -> solve (Right b0)
+traceCyclic (SemiringKleisli f) = SemiringKleisli $ \b0 ->
+  [(c, w) | (Right c, w) <- solve (Right b0)]
   where
-    solve :: Either a b -> [(c, r)]
+    solve :: Either a b -> [(Either a c, r)]
     solve start =
       let startEdges = f start
-          startLefts = [(a, w) | (Left a, w) <- startEdges]
-          startOuts = [(c, w) | (Right c, w) <- startEdges]
-          feedbackEdges a' = [(a'', w) | (Left a'', w) <- f (Left a')]
+          startLefts = [(q, w) | (Left a, w) <- startEdges, let q = Left a :: Either a b]
+          startOuts = [(Right c, w) | (Right c, w) <- startEdges]
+          feedbackEdges q = [(q', w) | (Left a', w) <- f q, let q' = Left a' :: Either a b]
           leftStates = feedbackClosure feedbackEdges (map fst startLefts)
-          idx a = fromMaybe (error "traceCyclic: feedback state escaped closure") (elemIndex a leftStates)
+          idx q = fromMaybe (error "traceCyclic: feedback state escaped closure") (elemIndex q leftStates)
           n = length leftStates
           adj =
             fromLists
-              [ [ sumR [w | (Left a', w) <- f (Left ai), a' == aj]
-                | aj <- leftStates
+              [ [ sumR [w | (Left a', w) <- f qi, let qj = Left a' :: Either a b, qj == qj_state]
+                | qj_state <- leftStates
                 ]
-              | ai <- leftStates
+              | qi <- leftStates
               ]
           closure = toLists (starMatrix adj)
           leftOuts j =
-            [ (outC, w)
-            | (Right outC, w) <- f (Left (leftStates !! j))
+            [ (Right outC, w)
+            | (Right outC, w) <- f (leftStates !! j)
             ]
           rawOuts =
             startOuts
               ++ [ (c, w1 Mul.* (closure !! i !! j) Mul.* w2)
-                 | (a, w1) <- startLefts,
-                   let i = idx a,
+                 | (q, w1) <- startLefts,
+                   let i = idx q,
                    j <- [0 .. n - 1],
                    (c, w2) <- leftOuts j
                  ]
        in normalize rawOuts
-
-instance (Ring.StarSemiring r, Normalizable r) => Traced Either (SemiringKleisli r) where
-  trace = traceCyclic
 
 -- ---------------------------------------------------------------------------
 -- Source parser choice and runner
@@ -553,16 +457,15 @@ instance (Ring.StarSemiring r, Normalizable r) => Traced Either (SemiringKleisli
 -- once rather than once per left success.
 altW ::
   forall f s a.
-  (Eq f, Eq a) =>
   EqParser [] f s a ->
   EqParser [] f s a ->
   EqParser [] f s a
-altW (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ CKleisli $ \case
+altW (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
   Right s ->
-    let ress = runCKleisli (C.run p1) s
+    let ress = runLoop p1 s
         successes = [res | res <- ress, not (isThat res)]
      in Left s : map Right successes
-  Left s -> map Right (runCKleisli (C.run p2) s)
+  Left s -> map Right (runLoop p2 s)
 
 -- | Weighted choice for a 'Weighted' source monad.
 --
@@ -573,57 +476,38 @@ altW (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ CKleisli $ \cas
 -- overcounts.
 altWeighted ::
   forall f s a r.
-  (Eq f, Eq a, Add.Additive r, Mul.Multiplicative r) =>
+  (Add.Additive r, Mul.Multiplicative r) =>
   EqParser (Weighted r) f s a ->
   EqParser (Weighted r) f s a ->
   EqParser (Weighted r) f s a
-altWeighted (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ CKleisli $ \case
+altWeighted (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
   Right s ->
-    let Weighted ress = runCKleisli (C.run p1) s
+    let Weighted ress = runLoop p1 s
         successes = [(res, w) | (res, w) <- ress, not (isThat res)]
      in Weighted $ (Left s, Mul.one) : map (first Right) successes
   Left s ->
-    Weighted $ map (first Right) (runWeighted (runCKleisli (C.run p2) s))
+    Weighted $ map (first Right) (runWeighted (runLoop p2 s))
 
--- | Natural transformation from source to target dictionaries.
---
--- Both categories have 'Ob = Eq', so the transformer is the identity.
-eqDict :: ObDict (CKleisli [] Eq) a -> ObDict (SemiringKleisli r) a
-eqDict ObDict = ObDict
-
--- | Interpret an 'EqParser' into the weighted target and collect the weighted
--- results for a given input.  This now uses the generic 'C.bind' fold with the
--- cyclic 'Traced Either' instance, so unbounded repetition is summed rather
--- than divergent.
+-- | Interpret a list-monad parser into the weighted target and collect the
+-- weighted results for a given input.
 runSemiringParser ::
   forall r f s a.
-  (Ring.StarSemiring r, Normalizable r, Uncons f s, Eq f, Eq s, Eq a) =>
+  (Normalizable r, Mul.Multiplicative r, Uncons f s, Eq f, Eq s, Eq a) =>
   EqParser [] f s a ->
   f ->
   [(These a f, r)]
 runSemiringParser p =
-  runSemiringKleisli (C.bind eqDict emb (unEqParser p))
-  where
-    emb :: CKleisli [] Eq C.:~> SemiringKleisli r
-    emb (CKleisli g) = SemiringKleisli $ \x -> [(y, Mul.one) | y <- g x]
+  normalize . map (,Mul.one) . runLoop (unEqParser p)
 
--- | Natural transformation from the weighted source to the weighted target.
-eqDictWeighted :: ObDict (CKleisli (Weighted r) Eq) a -> ObDict (SemiringKleisli r) a
-eqDictWeighted ObDict = ObDict
-
--- | Interpret a weighted 'EqParser' into the weighted relation target.
--- Each primitive contributes its own weight; alternatives sum over paths.
+-- | Interpret a weighted parser into the weighted target.
 runWeightedParser ::
   forall r f s a.
-  (Ring.StarSemiring r, Normalizable r, Uncons f s, Eq f, Eq s, Eq a) =>
+  (Normalizable r, Mul.Multiplicative r, Uncons f s, Eq f, Eq s, Eq a) =>
   EqParser (Weighted r) f s a ->
   f ->
   [(These a f, r)]
 runWeightedParser p =
-  runSemiringKleisli (C.bind eqDictWeighted emb (unEqParser p))
-  where
-    emb :: CKleisli (Weighted r) Eq C.:~> SemiringKleisli r
-    emb (CKleisli g) = SemiringKleisli (runWeighted . g)
+  normalize . runWeighted . runLoop (unEqParser p)
 
 -- | Sum the weights for all outputs, ignoring the outputs themselves.
 totalWeight :: (Add.Additive r) => [(x, r)] -> r
