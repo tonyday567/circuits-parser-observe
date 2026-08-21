@@ -1,5 +1,5 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 -- | Small, value-sized square-matrix helpers for semiring closure.
 --
@@ -37,7 +37,7 @@ toLists = unMatrix
 -- For a matrix @A@, computes @A* = I + A + A² + ...@ as the least fixed
 -- point of @X ↦ I + A·X@.
 starMatrix ::
-  (StarSemiring a, Additive a, Multiplicative a) =>
+  (StarSemiring a) =>
   Matrix a ->
   Matrix a
 starMatrix (Matrix []) = Matrix []
@@ -48,7 +48,7 @@ starMatrix (Matrix xss) =
                 mik = arr !! i !! k
                 mkj = arr !! k !! j
              in arr !! i !! j + mik * star mkk * mkj
-            | j <- [0 .. n - 1]
+          | j <- [0 .. n - 1]
           ]
         | i <- [0 .. n - 1]
         ]

@@ -78,7 +78,7 @@ instance (Monad m) => Traced Either (Kleisli (BranchingM m)) where
 
 -- | Run a parser with the branching trace and collect every result.
 runBranching ::
-  (Monad m, Uncons f s) =>
+  (Monad m) =>
   Parser (BranchingM m) f s a ->
   f ->
   m [These a f]
@@ -93,7 +93,7 @@ runBranching p f = observeAllT (runBranchingM (runParser p f))
 -- all exits.
 runLogic ::
   forall n f s a.
-  (Monad n, Uncons f s) =>
+  (Monad n) =>
   Parser (LogicT n) f s a ->
   f ->
   n [These a f]

@@ -8,18 +8,17 @@
 -- and how it is verified.
 module Main (main) where
 
+import Circuit.Meter.Time (ticksN)
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.These (These (..))
 import Data.Tree qualified as Tree
-import System.Exit (exitFailure)
-import Text.Printf (printf)
-
-import Circuit.Meter.Time (ticksN)
 import MarkupParse qualified as MP
 import MarkupParseLegacy qualified as MPL
+import System.Exit (exitFailure)
+import Text.Printf (printf)
 
 -- ---------------------------------------------------------------------------
 -- Test harness

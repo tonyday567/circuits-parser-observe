@@ -3,16 +3,15 @@
 -- 'Circuit.Meter.Time.ticksN' instead of criterion.
 module Main (main) where
 
+import Circuit.Meter.Time (ticksN)
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Control.Monad (forM_)
-import Data.ByteString qualified as B
-import Text.Printf (printf)
-
-import Circuit.Meter.Time (ticksN)
 import Corpus (ladder)
+import Data.ByteString qualified as B
 import MarkupParse qualified as MP
 import MarkupParseLegacy qualified as MPL
+import Text.Printf (printf)
 import Workload
 
 iterations :: Int

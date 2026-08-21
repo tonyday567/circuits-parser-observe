@@ -63,9 +63,9 @@ contentHeavy n len =
 -- Each entry: (label, document). Byte sizes are reported by the harness.
 ladder :: [(String, ByteString)]
 ladder =
-  [ ("flat-100", flat 100)
-  , ("flat-2000", flat 2000)
-  , ("nested-500", nested 500)
-  , ("wideAttrs-500x8", wideAttrs 500 8)
-  , ("contentHeavy-500x40", contentHeavy 500 40)
+  [ ("flat-100", flat 100),
+    ("flat-2000", flat 2000),
+    ("nested-500", nested 500),
+    ("wideAttrs-500x8", wideAttrs 500 8),
+    ("contentHeavy-500x40", contentHeavy 500 40)
   ]

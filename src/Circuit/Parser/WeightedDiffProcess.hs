@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- | A small regular/applicative parser syntax used as a lightweight front-end
 -- to the 'Circuit.Parser.ProcessCompiler' backend.
@@ -28,6 +29,7 @@ module Circuit.Parser.WeightedDiffProcess
   )
 where
 
+import Circuit.Diff (Diff', pattern Diff)
 import Circuit.Parser.DiffCompiler qualified as MC
 import Circuit.Parser.ProcessProbe (ABParam (..), Token (..), paramFold)
 import Circuit.Parser.Syntax
@@ -37,11 +39,10 @@ import Circuit.Parser.Syntax
     satisfyS,
     stringS,
   )
+import Circuit.Stats.Diff (DiffProcess (..))
 import Control.Applicative (Alternative (empty), (<|>))
 import NumHask.Algebra.Additive qualified as Add
 import NumHask.Algebra.Multiplicative qualified as Mul
-import Circuit.Diff (Diff, Diff' (..))
-import Circuit.Stats.Diff (DiffProcess (..))
 import Prelude
 
 -- $setup
@@ -84,7 +85,7 @@ toParserSyntax (WFmap g p) = g <$> toParserSyntax p
 -- 'Circuit.Parser.ProcessCompiler' backend.
 compileDiffProcess ::
   (Add.Additive p, Add.Additive r, Mul.Multiplicative r) =>
-  (Char -> Diff (p, Token) r) ->
+  (Char -> Diff' (p, Token) r) ->
   WParser Char a ->
   DiffProcess (MC.DiffState r (ParserSyntax String Char a)) (p, Token) r
 compileDiffProcess weight = MC.compileDiffProcess weight . toParserSyntax
@@ -95,18 +96,18 @@ compileDiffProcess weight = MC.compileDiffProcess weight . toParserSyntax
 
 -- | Differentiable weight for the two-token alphabet used in
 -- 'Circuit.Parser.SemiringProbe.outsideDemo'.
-abWeight :: Char -> Diff (ABParam, Token) Double
+abWeight :: Char -> Diff' (ABParam, Token) Double
 abWeight 'a' =
-  Diff' $ \(p, _) ->
+  Diff $ \(p, _) ->
     ( abWa p,
       \dw -> (ABParam dw 0, Token '\0')
     )
 abWeight 'b' =
-  Diff' $ \(p, _) ->
+  Diff $ \(p, _) ->
     ( abWb p,
       \dw -> (ABParam 0 dw, Token '\0')
     )
-abWeight _ = Diff' $ const (0, const (Add.zero, Token '\0'))
+abWeight _ = Diff $ const (0, const (Add.zero, Token '\0'))
 
 -- | Weighted parser for @"ab" | "a"@.
 abWParser :: WParser Char String

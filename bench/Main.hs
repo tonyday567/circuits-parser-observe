@@ -8,10 +8,9 @@ module Main (main) where
 
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
+import Corpus (ladder)
 import Criterion.Main
 import Data.ByteString qualified as B
-
-import Corpus (ladder)
 import MarkupParse qualified as MP
 import MarkupParseLegacy qualified as MPL
 import Workload
@@ -33,8 +32,8 @@ main = do
             "tokenize"
             [ bench "markup-parse-0.3" $ whnf (mpTokens MP.Html) bs,
               bench "markup-parse-0.2.2.0" $ whnf (mplTokens MPL.Html) bs
-            ]
-        , bgroup
+            ],
+          bgroup
             "markup"
             [ bench "markup-parse-0.3" $ whnf (mpMarkupNodes MP.Html) bs,
               bench "markup-parse-0.2.2.0" $ whnf (mplMarkupNodes MPL.Html) bs

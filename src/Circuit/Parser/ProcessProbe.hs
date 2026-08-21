@@ -1,5 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- | Process-machine bridge: parsing as a coalgebraic state machine.
 --
@@ -49,11 +50,11 @@ module Circuit.Parser.ProcessProbe
   )
 where
 
-import NumHask.Algebra.Additive qualified as Add
-import NumHask.Algebra.Multiplicative qualified as Mul
-import Circuit.Diff (Diff' (..))
+import Circuit.Diff (Diff, Diff', pattern Diff)
 import Circuit.Stats (Process (..))
 import Circuit.Stats.Diff (DiffProcess (..), diffFold, diffScan)
+import NumHask.Algebra.Additive qualified as Add
+import NumHask.Algebra.Multiplicative qualified as Mul
 import Prelude
 
 -- $setup
@@ -135,7 +136,7 @@ instance Add.Additive ABState where
 abDiffProcess :: DiffProcess ABState (ABParam, Token) Double
 abDiffProcess =
   DiffProcess
-    { dInject = Diff' $ \(p, Token c) -> case c of
+    { dInject = Diff $ \(p, Token c) -> case c of
         'a' ->
           ( ABState (abWa p) SawA,
             \(ABState dw' _) -> (ABParam dw' 0, Token '\0')
@@ -144,7 +145,7 @@ abDiffProcess =
           ( ABState 0 Rejected,
             const (ABParam 0 0, Token '\0')
           ),
-      dStep = Diff' $ \(ABState w m, (p, Token c)) -> case (m, c) of
+      dStep = Diff $ \(ABState w m, (p, Token c)) -> case (m, c) of
         (SawA, 'b') ->
           let w' = w * abWb p
            in ( ABState w' SawAB,
@@ -157,7 +158,7 @@ abDiffProcess =
           ( ABState 0 Rejected,
             const (ABState 0 m, (ABParam 0 0, Token '\0'))
           ),
-      dExtract = Diff' $ \(ABState w m) ->
+      dExtract = Diff $ \(ABState w m) ->
         let y = case m of
               SawA -> w
               SawAB -> w
@@ -181,7 +182,7 @@ paramFold m p cs =
 -- | Scan a string through a parameterised 'DiffProcess', returning the per-step
 -- outputs and the total gradient with respect to the parameters.
 paramScan ::
-  (Add.Additive s, Add.Additive b, Mul.Multiplicative b, Add.Additive p) =>
+  (Add.Additive s, Mul.Multiplicative b, Add.Additive p) =>
   DiffProcess s (p, Token) b ->
   p ->
   String ->
@@ -240,7 +241,7 @@ instance Add.Additive StackState where
 softStackProcess :: DiffProcess StackState (StackParam, Token) Double
 softStackProcess =
   DiffProcess
-    { dInject = Diff' $ \(p, Token c) ->
+    { dInject = Diff $ \(p, Token c) ->
         let h = case c of
               'a' -> pushAmt p
               'b' -> negate (popAmt p)
@@ -250,7 +251,7 @@ softStackProcess =
                   dPop = case c of 'b' -> negate dh'; _ -> 0
                in (StackParam dPush dPop, Token '\0')
          in (StackState h, pb),
-      dStep = Diff' $ \(StackState h, (p, Token c)) ->
+      dStep = Diff $ \(StackState h, (p, Token c)) ->
         let dh = case c of
               'a' -> pushAmt p
               'b' -> negate (popAmt p)
@@ -261,7 +262,7 @@ softStackProcess =
                   dPop = case c of 'b' -> negate dh'; _ -> 0
                in (StackState dh', (StackParam dPush dPop, Token '\0'))
          in (StackState h', pb),
-      dExtract = Diff' $ \(StackState h) ->
+      dExtract = Diff $ \(StackState h) ->
         let score = negate (h * h)
             pb dy = StackState (negate 2 * h * dy)
          in (score, pb)

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Shared workload definitions for both harnesses.
 --
 -- The point of a shared module is that the criterion harness and the

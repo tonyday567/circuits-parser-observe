@@ -81,8 +81,8 @@ executable circuits-parser-machina
   build-depends:
     base >=4.18 && <5,
     bytestring >=0.12 && <0.13,
-    circuits-parser >=0.1 && <0.2,
     circuits-meter >=0.1 && <0.2,
+    circuits-parser >=0.1 && <0.2,
     deepseq >=1.5 && <1.6,
 
 executable circuits-parser-aeson-oracle
@@ -112,9 +112,10 @@ benchmark markup-criterion
   other-modules:
     Corpus
     Workload
+
   hs-source-dirs: bench
   build-depends:
-    criterion >=1.6 && <1.7,
+    criterion >=1.6 && <1.7
 
 benchmark markup-meter
   import: ghc-options-exe-stanza
@@ -126,9 +127,10 @@ benchmark markup-meter
   other-modules:
     Corpus
     Workload
+
   hs-source-dirs: bench
   build-depends:
-    circuits-meter >=0.1 && <0.2,
+    circuits-meter >=0.1 && <0.2
 
 test-suite machinarium
   import: ghc-options-exe-stanza
@@ -140,6 +142,7 @@ test-suite machinarium
   hs-source-dirs:
     test
     bench
+
   build-depends:
     circuits-meter >=0.1 && <0.2,
     containers >=0.6 && <0.9,

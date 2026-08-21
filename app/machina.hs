@@ -6,8 +6,8 @@
 -- named, classified, and followed over time.
 module Main where
 
-import Circuit.Parser qualified as CP
 import Circuit.Meter.Time (ticksN)
+import Circuit.Parser qualified as CP
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as C
 import Data.Char (isAlphaNum)

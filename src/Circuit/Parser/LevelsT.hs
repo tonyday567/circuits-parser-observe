@@ -218,7 +218,7 @@ altLevels p1 p2 = loopToParser $ C.trace $ C.Lift $ Kleisli $ \case
 -- | Run a parser with fair breadth-first enumeration and collect every
 -- result.
 runParserLevelsT ::
-  (Monad m, Uncons f s) =>
+  (Monad m) =>
   Parser (LevelsT m) f s a ->
   f ->
   m [These a f]

@@ -190,7 +190,7 @@ next :: forall m f s. (Monad m, Uncons f s) => EqParser m f s s
 next = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (uncons f)
 
 -- | Apply a predicate to the result of 'uncons'.
-guardThese :: (Uncons f s) => (s -> Bool) -> f -> These s f -> These s f
+guardThese :: (s -> Bool) -> f -> These s f -> These s f
 guardThese p def =
   these
     (\a -> bool (That def) (This a) (p a))
@@ -318,7 +318,7 @@ empty = EqParser $ C.Lift $ PK $ Kleisli $ const mzero
 -- 'runSemiringParser').
 (<|>) ::
   forall m f s a.
-  (MonadPlus m, Uncons f s) =>
+  (MonadPlus m) =>
   EqParser m f s a ->
   EqParser m f s a ->
   EqParser m f s a
@@ -364,7 +364,7 @@ some ::
 some p = mapP (uncurry (:)) (pairP p (many p))
 
 -- | Attempt a parser. If it fails with 'That', restore the original stream.
-try :: forall m f s a. (Monad m, Uncons f s) => EqParser m f s a -> EqParser m f s a
+try :: forall m f s a. (Monad m) => EqParser m f s a -> EqParser m f s a
 try (EqParser p) = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
   res <- runLoop p s
   pure $ case res of

@@ -90,16 +90,16 @@ instance NHR.StarSemiring Dual2 where
 newtype Weighted (r :: Type) a = Weighted {runWeighted :: [(a, r)]}
   deriving stock (Eq, Show, Functor)
 
-instance (NHM.Multiplicative r, NHA.Additive r) => Applicative (Weighted r) where
+instance (NHM.Multiplicative r) => Applicative (Weighted r) where
   pure a = Weighted [(a, NHM.one)]
   Weighted fs <*> Weighted xs =
     Weighted [(f x, wf NHM.* wx) | (f, wf) <- fs, (x, wx) <- xs]
 
-instance (NHM.Multiplicative r, NHA.Additive r) => Monad (Weighted r) where
+instance (NHM.Multiplicative r) => Monad (Weighted r) where
   Weighted xs >>= f =
     Weighted [(b, w1 NHM.* w2) | (a, w1) <- xs, (b, w2) <- runWeighted (f a)]
 
-instance (NHM.Multiplicative r, NHA.Additive r) => Alternative (Weighted r) where
+instance (NHM.Multiplicative r) => Alternative (Weighted r) where
   empty = Weighted []
   Weighted xs <|> Weighted ys = Weighted (xs ++ ys)
 

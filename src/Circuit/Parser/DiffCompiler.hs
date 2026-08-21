@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Syntax-compiled differentiable parser: 'ParserSyntax' trees become
@@ -26,7 +27,7 @@ module Circuit.Parser.DiffCompiler
   )
 where
 
-import Circuit.Diff (Diff, Diff' (..))
+import Circuit.Diff (Diff, Diff', pattern Diff)
 import Circuit.Parser.ProcessProbe (ABParam (..), Token (..), paramFold)
 import Circuit.Parser.Syntax
   ( ParserSyntax (..),
@@ -69,8 +70,8 @@ nullableWeight = maybe Add.zero (const Mul.one) . nullableValue
 -- the scan.
 compileDiffProcess ::
   forall p r a.
-  (Add.Additive p, Add.Additive r, Mul.Multiplicative r) =>
-  (Char -> Diff (p, Token) r) ->
+  (Add.Additive r, Mul.Multiplicative r) =>
+  (Char -> Diff' (p, Token) r) ->
   ParserSyntax String Char a ->
   DiffProcess (DiffState r (ParserSyntax String Char a)) (p, Token) r
 compileDiffProcess weight p0 =
@@ -80,10 +81,10 @@ compileDiffProcess weight p0 =
       dExtract = extractDiff
     }
   where
-    injectDiff :: Diff (p, Token) (DiffState r (ParserSyntax String Char a))
-    injectDiff = Diff' $ \(param, Token c) ->
+    injectDiff :: Diff' (p, Token) (DiffState r (ParserSyntax String Char a))
+    injectDiff = Diff $ \(param, Token c) ->
       let q' = derive c p0
-          Diff' wDiff = weight c
+          Diff wDiff = weight c
           (wToken, pw) = wDiff (param, Token c)
        in ( DiffState (wToken, Just q'),
             \dstate ->
@@ -93,13 +94,13 @@ compileDiffProcess weight p0 =
           )
 
     stepDiff ::
-      Diff
+      Diff'
         (DiffState r (ParserSyntax String Char a), (p, Token))
         (DiffState r (ParserSyntax String Char a))
-    stepDiff = Diff' $ \(DiffState (w, mq), (param, Token c)) ->
+    stepDiff = Diff $ \(DiffState (w, mq), (param, Token c)) ->
       let q = fromMaybe empty mq
           q'' = derive c q
-          Diff' wDiff = weight c
+          Diff wDiff = weight c
           (wToken, pw) = wDiff (param, Token c)
           w' = w Mul.* wToken
        in ( DiffState (w', Just q''),
@@ -111,8 +112,8 @@ compileDiffProcess weight p0 =
                in (DiffState (dwToW, mq), (dparam, dToken))
           )
 
-    extractDiff :: Diff (DiffState r (ParserSyntax String Char a)) r
-    extractDiff = Diff' $ \(DiffState (w, mq)) ->
+    extractDiff :: Diff' (DiffState r (ParserSyntax String Char a)) r
+    extractDiff = Diff $ \(DiffState (w, mq)) ->
       let nw = maybe Add.zero nullableWeight mq
           y = w Mul.* nw
        in (y, \dy -> DiffState (dy Mul.* nw, mq))
@@ -123,18 +124,18 @@ compileDiffProcess weight p0 =
 
 -- | Differentiable weight for the two-token alphabet used in
 -- 'Circuit.Parser.SemiringProbe.outsideDemo'.
-abWeight :: Char -> Diff (ABParam, Token) Double
+abWeight :: Char -> Diff' (ABParam, Token) Double
 abWeight 'a' =
-  Diff' $ \(p, _) ->
+  Diff $ \(p, _) ->
     ( abWa p,
       \dw -> (ABParam dw 0, Token '\0')
     )
 abWeight 'b' =
-  Diff' $ \(p, _) ->
+  Diff $ \(p, _) ->
     ( abWb p,
       \dw -> (ABParam 0 dw, Token '\0')
     )
-abWeight _ = Diff' $ const (0, const (Add.zero, Token '\0'))
+abWeight _ = Diff $ const (0, const (Add.zero, Token '\0'))
 
 -- | Weighted parser syntax for @\"ab\" | \"a\"@.
 abParserSyntax :: ParserSyntax String Char String
