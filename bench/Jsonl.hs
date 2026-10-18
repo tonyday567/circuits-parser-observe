@@ -26,10 +26,11 @@
 --        jsonl-micro alloc ENGINE TOKS  — single run (for +RTS -s)
 module Main (main) where
 
-import Circuit.Category (K (..))
+import Circuit.Category (K (..), runK)
 import Circuit.Machine (Cell (..), Step (..))
-import Circuit.Meter.Time (Nanos, ticks)
+import Circuit.Meter.Time (Nanos, nanos)
 import Circuit.Parser.Json (JsonToken (..), runJsonLexerBS)
+import Circuit.Traced (Yank (..))
 import Control.Monad (forM_)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -126,6 +127,7 @@ cell src =
   Cell
     (K (\() -> Identity (St CStruct 0 0)))
     (Step (K (\(st, wi) -> Identity (mstep src (st, wi)))))
+{-# INLINE cell #-}
 
 mstep :: ByteString -> (St, (Word8, Int)) -> (St, Em)
 mstep src (St c s _, (w, i)) = case (c, w) of
@@ -156,6 +158,7 @@ mstep src (St c s _, (w, i)) = case (c, w) of
         Nothing -> error "bad number delimiter"
   where
     atom t = (St CStruct 0 0, E1 t)
+{-# INLINE mstep #-}
 
 -- | Hand-drive the Cell over the bytes; the string/number slices are cut
 -- against the source inside the step.
@@ -178,6 +181,36 @@ runJsonMachineBS src =
   where
     !len = BS.length src
 
+-- | Strict loop carrier for the yank runner: no per-iteration thunk chains.
+data Loop = Loop !St !Int [JsonToken]
+
+-- | The machine driven through 'yank' at the Either tensor over K IO —
+-- the delimited-continuation runner from Circuit.Traced. Each iteration
+-- re-enters a prompt; a Left fires control0, capturing the continuation
+-- and jumping back — constant stack, but every byte crosses the boundary.
+runJsonMachineIO :: ByteString -> IO [JsonToken]
+runJsonMachineIO src = runK (yank body) ()
+  where
+    !len = BS.length src
+    Cell (K seed) (Step (K stf)) = cell src
+    s0 = runIdentity (seed ())
+    body :: K IO (Either Loop ()) (Either Loop [JsonToken])
+    body =
+      K $ \case
+        Right () -> pure (Left (Loop s0 0 []))
+        Left (Loop st i acc)
+          | i >= len -> pure (Right (reverse (flush st acc)))
+          | otherwise ->
+              case runIdentity (stf (st, (BSU.unsafeIndex src i, i))) of
+                (st', e) -> pure (Left (Loop st' (i + 1) (push e acc)))
+    push e acc = case e of
+      E0 -> acc
+      E1 t -> t : acc
+      E2 t u -> u : t : acc
+    flush (St cst s _) acc = case cst of
+      CNumber -> TNumber (sliceBS src s len) : acc
+      _ -> acc
+
 -- * predicates
 
 isNumW, isSpaceW, isDigitW :: Word8 -> Bool
@@ -197,14 +230,15 @@ structTok = \case
 
 -- * harness
 
-engines :: [(String, ByteString -> [JsonToken])]
+engines :: [(String, ByteString -> IO [JsonToken])]
 engines =
-  [ ("runJsonLexerBS", either (error "runJsonLexerBS failed") id . runJsonLexerBS),
-    ("runJsonMachineBS", runJsonMachineBS)
+  [ ("runJsonLexerBS", pure . either (error "runJsonLexerBS failed") id . runJsonLexerBS),
+    ("runJsonMachineBS", pure . runJsonMachineBS),
+    ("runJsonMachineIO", runJsonMachineIO)
   ]
 
-scans :: [(String, ByteString -> Int)]
-scans = [("walk-only", lexCount)]
+scans :: [(String, ByteString -> IO Int)]
+scans = [("walk-only", pure . lexCount)]
 
 main :: IO ()
 main = do
@@ -217,8 +251,8 @@ allocMode :: String -> Int -> IO ()
 allocMode eng toks =
   let src = jsonl toks
    in case (lookup eng engines, lookup eng scans) of
-        (Just f, Nothing) -> hPrint stderr (BS.length src) >> print (length (f src))
-        (Nothing, Just f) -> hPrint stderr (BS.length src) >> print (f src)
+        (Just f, Nothing) -> hPrint stderr (BS.length src) >> (f src >>= print . length)
+        (Nothing, Just f) -> hPrint stderr (BS.length src) >> (f src >>= print)
         _ -> error "usage: jsonl-micro alloc ENGINE TOKENS"
 
 -- | Reps per shape, scaled so each measurement is ~30ms minimum.
@@ -226,11 +260,23 @@ repsFor :: Int -> Int
 repsFor toks = max 30 (200000 `div` (toks `div` 10))
 
 -- | Minimum (pure CPU, GC-lightest rep) and mean (GC amortised in) of
--- per-rep timings.
-statsOf :: Int -> (a -> b) -> a -> IO (Nanos, Nanos)
-statsOf n f a = do
-  (ts, _) <- ticks n f a
-  pure (minimum ts, sum ts `div` fromIntegral n)
+-- per-rep timings of an IO action, no built-in warmup.
+statsOf :: Int -> IO a -> IO (Nanos, Nanos)
+statsOf n act = go n []
+  where
+    go 0 ts = pure (minimum ts, sum ts `div` fromIntegral n)
+    go i ts = do
+      t0 <- nanos
+      !_ <- act
+      t1 <- nanos
+      go (i - 1) ((t1 - t0) : ts)
+
+-- | Force the full token spine inside the timed region.
+timed :: (ByteString -> IO [JsonToken]) -> ByteString -> IO Int
+timed f src = do
+  ts <- f src
+  let !l = length ts
+  pure l
 
 benchAll :: IO ()
 benchAll = do
@@ -248,26 +294,32 @@ benchAll = do
             (fromIntegral nsMin / fromIntegral toks :: Double)
             (fromIntegral nsMean / fromIntegral toks :: Double)
             (fromIntegral nsMin / fromIntegral (BS.length src) :: Double)
-    forM_ engines $ \(eng, f) -> statsOf (repsFor toks) (length . f) src >>= row eng
-    forM_ scans $ \(eng, f) -> statsOf (repsFor toks) f src >>= row eng
+    forM_ engines $ \(eng, f) -> statsOf (repsFor toks) (timed f src) >>= row eng
+    forM_ scans $ \(eng, f) -> statsOf (repsFor toks) (f src) >>= row eng
 
 warmup :: IO ()
 warmup =
   forM_ shapes $ \(_, _, src) -> do
-    forM_ engines $ \(_, f) -> statsOf 3 (length . f) src
-    forM_ scans $ \(_, f) -> statsOf 3 f src
+    forM_ engines $ \(_, f) -> statsOf 3 (timed f src)
+    forM_ scans $ \(_, f) -> statsOf 3 (f src)
 
 conserve :: (String, Int, ByteString) -> IO ()
 conserve (label, toks, src) = case engines of
   [] -> pure ()
   ((e0, f0) : rest) -> do
-    let r0 = f0 src
+    r0 <- f0 src
     if length r0 /= toks
       then error ("corpus off on " <> label <> ": expected " <> show toks <> " tokens, got " <> show (length r0))
       else
-        mapM_
-          (\(e, f) -> if f src == r0 then pure () else error ("conservation broken on " <> label <> ": " <> e <> " vs " <> e0))
+        forM_
           rest
-    mapM_
-      (\(e, f) -> if f src == toks then pure () else error ("scan count off on " <> label <> ": " <> e))
+          ( \(e, f) -> do
+              r <- f src
+              if r == r0 then pure () else error ("conservation broken on " <> label <> ": " <> e <> " vs " <> e0)
+          )
+    forM_
       scans
+      ( \(e, f) -> do
+          n <- f src
+          if n == toks then pure () else error ("scan count off on " <> label <> ": " <> e)
+      )
