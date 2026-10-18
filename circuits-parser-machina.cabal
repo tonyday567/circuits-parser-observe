@@ -102,21 +102,6 @@ executable circuits-parser-aeson-oracle
     text >=2.1.3 && <2.2,
     vector >=0.13 && <0.14,
 
-benchmark markup-criterion
-  import: ghc-options-exe-stanza
-  import: ghc-options-stanza
-  import: bench-deps
-  default-language: GHC2024
-  type: exitcode-stdio-1.0
-  main-is: Main.hs
-  other-modules:
-    Corpus
-    Workload
-
-  hs-source-dirs: bench
-  build-depends:
-    criterion >=1.6 && <1.7
-
 benchmark markup-meter
   import: ghc-options-exe-stanza
   import: ghc-options-stanza
@@ -131,6 +116,48 @@ benchmark markup-meter
   hs-source-dirs: bench
   build-depends:
     circuits-meter >=0.1 && <0.2
+
+executable markup-alloc
+  import: ghc-options-exe-stanza
+  import: ghc-options-stanza
+  import: bench-deps
+  default-language: GHC2024
+  main-is: Alloc.hs
+  other-modules:
+    Corpus
+    Workload
+
+  hs-source-dirs: bench
+  build-depends:
+    base,
+    bytestring,
+    markup-parse,
+
+executable parser-micro
+  import: ghc-options-exe-stanza
+  import: ghc-options-stanza
+  default-language: GHC2024
+  main-is: Micro.hs
+  hs-source-dirs: bench
+  build-depends:
+    base,
+    bytestring,
+    circuits,
+    circuits-meter,
+    circuits-parser,
+
+executable jsonl-micro
+  import: ghc-options-exe-stanza
+  import: ghc-options-stanza
+  default-language: GHC2024
+  main-is: Jsonl.hs
+  hs-source-dirs: bench
+  build-depends:
+    base,
+    bytestring,
+    circuits,
+    circuits-meter,
+    circuits-parser,
 
 test-suite machinarium
   import: ghc-options-exe-stanza

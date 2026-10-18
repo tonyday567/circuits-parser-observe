@@ -11,4 +11,6 @@ packages:
     ../../haskell/numhask-space
     ../../haskell/harpie
     ../../haskell/circuits-stats
+    ../../haskell/circuits-prob
+    ../../haskell/circuits-rel
     /Users/tonyday567/other/logict
