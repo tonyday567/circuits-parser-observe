@@ -113,24 +113,30 @@ lexCount bs = go 0 0
 
 -- * the machine
 
+--
+-- The Cell is input-independent: emissions carry spans (start, end) into
+-- the source, and the runner — which holds the source — cuts the slices.
+
+-- | One emission, flat: nothing, an atom, a span to slice, or a span plus
+-- the structural token that terminated it.
+data Em = E0 | EAtom JsonToken | EStr !Int !Int | ENum !Int !Int | ENumStruct !Int !Int JsonToken
+
 data Ctx = CStruct | CString | CStringEsc | CNumber | CLit !Int JsonToken
 
 data St = St !Ctx !Int !Int
 
--- | Emission discipline: a per-tick machine has no pushback, so the byte
--- that terminates a number must also be processed — 'E2' carries the
--- number token and the structural token it ended on.
-data Em = E0 | E1 JsonToken | E2 JsonToken JsonToken
-
-cell :: ByteString -> Cell (,) (,) St St (K Identity) (Word8, Int) Em
-cell src =
+jsonCell :: Cell (,) (,) St St (K Identity) (Word8, Int) Em
+jsonCell =
   Cell
     (K (\() -> Identity (St CStruct 0 0)))
-    (Step (K (\(st, wi) -> Identity (mstep src (st, wi)))))
-{-# INLINE cell #-}
+    (Step (K (Identity . mstep)))
+{-# INLINE jsonCell #-}
 
-mstep :: ByteString -> (St, (Word8, Int)) -> (St, Em)
-mstep src (St c s _, (w, i)) = case (c, w) of
+-- | Emission discipline: a per-tick machine has no pushback, so the byte
+-- that terminates a number must also be processed — 'ENumStruct' carries
+-- the number span and the structural token it ended on.
+mstep :: (St, (Word8, Int)) -> (St, Em)
+mstep (St c s _, (w, i)) = case (c, w) of
   (CStruct, 0x7B) -> atom TBraceOpen
   (CStruct, 0x7D) -> atom TBraceClose
   (CStruct, 0x5B) -> atom TBrackOpen
@@ -145,46 +151,53 @@ mstep src (St c s _, (w, i)) = case (c, w) of
     | isNumW w -> (St CNumber i 0, E0)
     | otherwise -> (St CStruct 0 0, E0)
   (CString, 0x5C) -> (St CStringEsc s 0, E0)
-  (CString, 0x22) -> (St CStruct 0 0, E1 (TString (sliceBS src s i)))
+  (CString, 0x22) -> (St CStruct 0 0, EStr s i)
   (CString, _) -> (St CString s 0, E0)
   (CStringEsc, _) -> (St CString s 0, E0)
-  (CLit 1 tok, _) -> (St CStruct 0 0, E1 tok)
+  (CLit 1 tok, _) -> (St CStruct 0 0, EAtom tok)
   (CLit n tok, _) -> (St (CLit (n - 1) tok) 0 0, E0)
   (CNumber, _)
     | isNumW w -> (St CNumber s 0, E0)
-    | isSpaceW w -> (St CStruct 0 0, E1 (TNumber (sliceBS src s i)))
+    | isSpaceW w -> (St CStruct 0 0, ENum s i)
     | otherwise -> case structTok w of
-        Just t -> (St CStruct 0 0, E2 (TNumber (sliceBS src s i)) t)
+        Just t -> (St CStruct 0 0, ENumStruct s i t)
         Nothing -> error "bad number delimiter"
   where
-    atom t = (St CStruct 0 0, E1 t)
+    atom t = (St CStruct 0 0, EAtom t)
 {-# INLINE mstep #-}
 
--- | Hand-drive the Cell over the bytes; the string/number slices are cut
--- against the source inside the step.
+-- * runner-shared materialization
+
+push :: ByteString -> Em -> [JsonToken] -> [JsonToken]
+push src e acc = case e of
+  E0 -> acc
+  EAtom t -> t : acc
+  EStr s e' -> TString (sliceBS src s e') : acc
+  ENum s e' -> TNumber (sliceBS src s e') : acc
+  ENumStruct s e' t -> t : TNumber (sliceBS src s e') : acc
+{-# INLINE push #-}
+
+flush :: ByteString -> Int -> St -> [JsonToken] -> [JsonToken]
+flush src len (St cst s _) acc = case cst of
+  CNumber -> TNumber (sliceBS src s len) : acc
+  _ -> acc
+
+-- | Hand-drive 'jsonCell' over the bytes, cutting span slices as they emit.
 runJsonMachineBS :: ByteString -> [JsonToken]
-runJsonMachineBS src =
-  let Cell (K seed) (Step (K stf)) = cell src
-      s0 = runIdentity (seed ())
-      go !st !i !acc
-        | i >= len = reverse (flush st acc)
-        | otherwise = case runIdentity (stf (st, (BSU.unsafeIndex src i, i))) of
-            (st', e) -> go st' (i + 1) (push e acc)
-      push e acc = case e of
-        E0 -> acc
-        E1 t -> t : acc
-        E2 t u -> u : t : acc
-      flush (St cst s _) acc = case cst of
-        CNumber -> TNumber (sliceBS src s len) : acc
-        _ -> acc
-   in go s0 0 []
+runJsonMachineBS src = go s0 0 []
   where
     !len = BS.length src
+    Cell (K seed) (Step (K stf)) = jsonCell
+    s0 = runIdentity (seed ())
+    go !st !i !acc
+      | i >= len = reverse (flush src len st acc)
+      | otherwise = case runIdentity (stf (st, (BSU.unsafeIndex src i, i))) of
+          (st', e) -> go st' (i + 1) (push src e acc)
 
 -- | Strict loop carrier for the yank runner: no per-iteration thunk chains.
 data Loop = Loop !St !Int [JsonToken]
 
--- | The machine driven through 'yank' at the Either tensor over K IO —
+-- | 'jsonCell' driven through 'yank' at the Either tensor over K IO —
 -- the delimited-continuation runner from Circuit.Traced. Each iteration
 -- re-enters a prompt; a Left fires control0, capturing the continuation
 -- and jumping back — constant stack, but every byte crosses the boundary.
@@ -192,24 +205,17 @@ runJsonMachineIO :: ByteString -> IO [JsonToken]
 runJsonMachineIO src = runK (yank body) ()
   where
     !len = BS.length src
-    Cell (K seed) (Step (K stf)) = cell src
+    Cell (K seed) (Step (K stf)) = jsonCell
     s0 = runIdentity (seed ())
     body :: K IO (Either Loop ()) (Either Loop [JsonToken])
     body =
       K $ \case
         Right () -> pure (Left (Loop s0 0 []))
         Left (Loop st i acc)
-          | i >= len -> pure (Right (reverse (flush st acc)))
+          | i >= len -> pure (Right (reverse (flush src len st acc)))
           | otherwise ->
               case runIdentity (stf (st, (BSU.unsafeIndex src i, i))) of
-                (st', e) -> pure (Left (Loop st' (i + 1) (push e acc)))
-    push e acc = case e of
-      E0 -> acc
-      E1 t -> t : acc
-      E2 t u -> u : t : acc
-    flush (St cst s _) acc = case cst of
-      CNumber -> TNumber (sliceBS src s len) : acc
-      _ -> acc
+                (st', e) -> pure (Left (Loop st' (i + 1) (push src e acc)))
 
 -- * predicates
 
