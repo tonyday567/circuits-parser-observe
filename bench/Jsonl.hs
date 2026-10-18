@@ -1,29 +1,28 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | jsonl-micro: floor-vs-machine, pinned down by ladder.
+-- | jsonl-micro: 'runJsonLexerBS' vs 'runJsonMachineBS'.
 --
--- The first run of this suite showed the per-byte machine *faster* than the
--- shipped floor lexer (11.5 vs 14.0 ns/B), which contradicted the "floor is
--- the lower bound" story. This version decomposes that delta: a ladder of
--- engines, each removing exactly one mechanism of the shipped floor, all
--- producing identical token output:
+--   runJsonLexerBS  — the library lexer from Circuit.Parser.Json.Lexer:
+--                     token-recursion with inner span loops, strict
+--                     accumulator, literal validation, error offsets.
+--   runJsonMachineBS — the same tokenizer as a Circuit.Machine Cell/Step:
+--                     one tick per byte, explicit (Ctx, start) state,
+--                     0/1/2-token emissions ('E2' — a per-tick machine has
+--                     no pushback, so the byte that ends a number also
+--                     emits its structural token).
+--   walk-only       — count-only traversal diagnostic: no slices, no
+--                     tokens, no list. Reference for materialization cost.
 --
---   floor       — 'runJsonLexerBS' as shipped: Either fmap consing,
---                 literal validation via temp slice + compare.
---   floor-nolit — same loop, literals counted not validated (machine parity
---                 on that axis). delta = literal validation cost.
---   floor-acc   — same scans, strict accumulator + reverse, no Either.
---                 delta = Either/lazy-cons cost.
---   machine     — per-byte Cell/Step state machine. delta = iteration
---                 granularity (token-recursion vs per-byte).
---   floor-scan  — count-only traversal: no slices, no tokens, no list.
---                 Brackets materialization cost: floor-acc - floor-scan.
+-- The lexer was restructured after a decomposition run of this suite showed
+-- its Either fmap consing cost ~4 ns/token and literal validation ~0.6;
+-- the strict-accumulator version keeps the exact error contract.
 --
--- Corpus: one wire-flavoured line of exactly 50 tokens; shapes are round
--- token counts (1000/2000/4000/8000) so scaling is visible per-token.
+-- Corpus: a JSON value always tokenizes to an odd count, so round token
+-- totals come from an A/B line pair (51 + 49 = 100 tokens); shapes are
+-- exact multiples of 1000 so scaling is visible per-token.
 --
--- Usage: jsonl-micro                    — conservation, then timing ladder
+-- Usage: jsonl-micro                    — conservation, then timing table
 --        jsonl-micro alloc ENGINE TOKS  — single run (for +RTS -s)
 module Main (main) where
 
@@ -79,148 +78,7 @@ shapes =
 sliceBS :: ByteString -> Int -> Int -> ByteString
 sliceBS bs s e = BSU.unsafeTake (e - s) (BSU.unsafeDrop s bs)
 
--- * ladder step 1b: verbatim local copy of the shipped floor
-
---
--- Anchor for compilation drift: identical code, identical helper structure
--- (local where-closures over bs/len). An earlier "copy" that factored the
--- span scanners out to top-level functions ran ~30% slower — helper
--- structure, not module boundaries, is what moves the lazy variants.
-
-lexFloorVerbatim :: ByteString -> Either (Int, String) [JsonToken]
-lexFloorVerbatim bs = go 0
-  where
-    !len = BS.length bs
-    go !i
-      | i >= len = Right []
-      | otherwise = case BSU.unsafeIndex bs i of
-          w
-            | isSpaceW w -> go (i + 1)
-          0x7B -> emit TBraceOpen i
-          0x7D -> emit TBraceClose i
-          0x5B -> emit TBrackOpen i
-          0x5D -> emit TBrackClose i
-          0x2C -> emit TComma i
-          0x3A -> emit TColon i
-          0x22 -> stringAt (i + 1)
-          0x74 -> literalAt i "rue" TTrue
-          0x66 -> literalAt i "alse" TFalse
-          0x6E -> literalAt i "ull" TNull
-          w
-            | w == 0x2D || isDigitW w -> numberAt i
-            | otherwise -> Left (i, "unexpected byte " ++ show w)
-    emit t i = (t :) <$> go (i + 1)
-    stringAt !i = case stringEnd i of
-      Nothing -> Left (len, "unterminated string")
-      Just j -> (TString (slice i j) :) <$> go (j + 1)
-    stringEnd !i
-      | i >= len = Nothing
-      | otherwise = case BSU.unsafeIndex bs i of
-          0x5C -> if i + 1 >= len then Nothing else stringEnd (i + 2)
-          0x22 -> Just i
-          _ -> stringEnd (i + 1)
-    numberAt !i =
-      let !j = numberEnd i
-       in (TNumber (slice i j) :) <$> go j
-    numberEnd !i
-      | i >= len = i
-      | otherwise =
-          let w = BSU.unsafeIndex bs i
-           in if isNumW w then numberEnd (i + 1) else i
-    literalAt !i rest t
-      | i + 1 + BS.length rest <= len && BSU.unsafeTake (BS.length rest) (BSU.unsafeDrop (i + 1) bs) == rest =
-          (t :) <$> go (i + 1 + BS.length rest)
-      | otherwise = Left (i, "bad literal")
-    slice s e = BSU.unsafeTake (e - s) (BSU.unsafeDrop s bs)
-
--- * ladder step 2: floor minus literal validation (counted, machine parity)
-
-lexNoLit :: ByteString -> [JsonToken]
-lexNoLit bs = either (error "lexNoLit failed") id (go 0)
-  where
-    !len = BS.length bs
-    go :: Int -> Either (Int, String) [JsonToken]
-    go !i
-      | i >= len = Right []
-      | otherwise = case BSU.unsafeIndex bs i of
-          w
-            | isSpaceW w -> go (i + 1)
-          0x7B -> emit TBraceOpen i
-          0x7D -> emit TBraceClose i
-          0x5B -> emit TBrackOpen i
-          0x5D -> emit TBrackClose i
-          0x2C -> emit TComma i
-          0x3A -> emit TColon i
-          0x22 -> stringAt (i + 1)
-          0x74 -> emitAt TTrue i 4
-          0x66 -> emitAt TFalse i 5
-          0x6E -> emitAt TNull i 4
-          w
-            | w == 0x2D || isDigitW w -> numberAt i
-            | otherwise -> Left (i, "unexpected byte " ++ show w)
-    emit t i = (t :) <$> go (i + 1)
-    emitAt t i n = (t :) <$> go (i + n)
-    stringAt !i = case stringEnd i of
-      Nothing -> Left (len, "unterminated string")
-      Just j -> (TString (slice i j) :) <$> go (j + 1)
-    stringEnd !i
-      | i >= len = Nothing
-      | otherwise = case BSU.unsafeIndex bs i of
-          0x5C -> if i + 1 >= len then Nothing else stringEnd (i + 2)
-          0x22 -> Just i
-          _ -> stringEnd (i + 1)
-    numberAt !i =
-      let !j = numberEnd i
-       in (TNumber (slice i j) :) <$> go j
-    numberEnd !i
-      | i >= len = i
-      | otherwise =
-          let w = BSU.unsafeIndex bs i
-           in if isNumW w then numberEnd (i + 1) else i
-    slice s e = BSU.unsafeTake (e - s) (BSU.unsafeDrop s bs)
-
--- * ladder step 3: minus Either/lazy consing (strict accumulator + reverse)
-
-lexAcc :: ByteString -> [JsonToken]
-lexAcc bs = go 0 []
-  where
-    !len = BS.length bs
-    go !i !acc
-      | i >= len = reverse acc
-      | otherwise = case BSU.unsafeIndex bs i of
-          w
-            | isSpaceW w -> go (i + 1) acc
-          0x7B -> go (i + 1) (TBraceOpen : acc)
-          0x7D -> go (i + 1) (TBraceClose : acc)
-          0x5B -> go (i + 1) (TBrackOpen : acc)
-          0x5D -> go (i + 1) (TBrackClose : acc)
-          0x2C -> go (i + 1) (TComma : acc)
-          0x3A -> go (i + 1) (TColon : acc)
-          0x22 -> case stringEnd (i + 1) of
-            Just j -> go (j + 1) (TString (slice (i + 1) j) : acc)
-            Nothing -> error "unterminated string"
-          0x74 -> go (i + 4) (TTrue : acc)
-          0x66 -> go (i + 5) (TFalse : acc)
-          0x6E -> go (i + 4) (TNull : acc)
-          w
-            | w == 0x2D || isDigitW w ->
-                let !j = numberEnd i
-                 in go j (TNumber (slice i j) : acc)
-            | otherwise -> error "unexpected byte"
-    stringEnd !i
-      | i >= len = Nothing
-      | otherwise = case BSU.unsafeIndex bs i of
-          0x5C -> if i + 1 >= len then Nothing else stringEnd (i + 2)
-          0x22 -> Just i
-          _ -> stringEnd (i + 1)
-    numberEnd !i
-      | i >= len = i
-      | otherwise =
-          let w = BSU.unsafeIndex bs i
-           in if isNumW w then numberEnd (i + 1) else i
-    slice s e = BSU.unsafeTake (e - s) (BSU.unsafeDrop s bs)
-
--- * ladder diagnostic: count-only traversal, no materialization
+-- * walk-only diagnostic: count-only traversal, no materialization
 
 lexCount :: ByteString -> Int
 lexCount bs = go 0 0
@@ -252,7 +110,7 @@ lexCount bs = go 0 0
           let w = BSU.unsafeIndex bs i
            in if isNumW w then numberEnd (i + 1) else i
 
--- * ladder step 4: the machine
+-- * the machine
 
 data Ctx = CStruct | CString | CStringEsc | CNumber | CLit !Int JsonToken
 
@@ -301,8 +159,8 @@ mstep src (St c s _, (w, i)) = case (c, w) of
 
 -- | Hand-drive the Cell over the bytes; the string/number slices are cut
 -- against the source inside the step.
-runMachine :: ByteString -> [JsonToken]
-runMachine src =
+runJsonMachineBS :: ByteString -> [JsonToken]
+runJsonMachineBS src =
   let Cell (K seed) (Step (K stf)) = cell src
       s0 = runIdentity (seed ())
       go !st !i !acc
@@ -341,15 +199,12 @@ structTok = \case
 
 engines :: [(String, ByteString -> [JsonToken])]
 engines =
-  [ ("floor", either (error "floor lexer failed") id . runJsonLexerBS),
-    ("floor-verb", either (error "floor-verb failed") id . lexFloorVerbatim),
-    ("floor-nolit", lexNoLit),
-    ("floor-acc", lexAcc),
-    ("machine", runMachine)
+  [ ("runJsonLexerBS", either (error "runJsonLexerBS failed") id . runJsonLexerBS),
+    ("runJsonMachineBS", runJsonMachineBS)
   ]
 
 scans :: [(String, ByteString -> Int)]
-scans = [("floor-scan", lexCount)]
+scans = [("walk-only", lexCount)]
 
 main :: IO ()
 main = do
@@ -382,11 +237,11 @@ benchAll = do
   mapM_ conserve shapes
   putStrLn "conservation: exact (all token engines agree, scans count the same)"
   warmup
-  putStrLn "shape            bytes    engine   ns/tok-min  ns/tok-mean    ns/B-min"
+  putStrLn "shape            bytes engine           ns/tok-min  ns/tok-mean    ns/B-min"
   forM_ shapes $ \(label, toks, src) -> do
     let row eng (nsMin, nsMean) =
           printf
-            "%-14s %8d %-12s %10.3f %10.3f %10.3f\n"
+            "%-14s %5d %-16s %10.3f %10.3f %10.3f\n"
             label
             (BS.length src)
             eng
