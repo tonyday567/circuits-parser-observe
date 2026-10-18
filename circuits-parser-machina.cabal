@@ -152,12 +152,28 @@ executable jsonl-micro
   default-language: GHC2024
   main-is: Jsonl.hs
   hs-source-dirs: bench
+  other-modules: Engines
   build-depends:
     base,
     bytestring,
     circuits,
     circuits-meter,
     circuits-parser,
+
+executable wires-micro
+  import: ghc-options-exe-stanza
+  import: ghc-options-stanza
+  default-language: GHC2024
+  main-is: Wires.hs
+  hs-source-dirs: bench
+  other-modules: Engines
+  build-depends:
+    base,
+    bytestring,
+    circuits,
+    circuits-meter,
+    circuits-parser,
+    vector,
 
 test-suite machinarium
   import: ghc-options-exe-stanza
