@@ -18,7 +18,7 @@ where
 import Circuit.Category (K (..), runK)
 import Circuit.Machine (Cell (..), Step (..))
 import Circuit.Parser.Json (JsonToken (..))
-import Circuit.Traced (Yank (..))
+import Circuit.Traced (Trace (..))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Unsafe qualified as BSU
@@ -145,15 +145,15 @@ runJsonMachineBS src = go s0 0 []
       | otherwise = case runIdentity (stf (st, (BSU.unsafeIndex src i, i))) of
           (st', e) -> go st' (i + 1) (push src e acc)
 
--- | Strict loop carrier for the yank runner: no per-iteration thunk chains.
+-- | Strict loop carrier for the trace runner: no per-iteration thunk chains.
 data Loop = Loop !St !Int [JsonToken]
 
--- | 'jsonCell' driven through 'yank' at the Either tensor over K IO —
+-- | 'jsonCell' driven through 'trace' at the Either tensor over K IO —
 -- the delimited-continuation runner from Circuit.Traced. Each iteration
 -- re-enters a prompt; a Left fires control0, capturing the continuation
 -- and jumping back — constant stack, but every byte crosses the boundary.
 runJsonMachineIO :: ByteString -> IO [JsonToken]
-runJsonMachineIO src = runK (yank body) ()
+runJsonMachineIO src = runK (trace body) ()
   where
     !len = BS.length src
     Cell (K seed) (Step (K stf)) = jsonCell
