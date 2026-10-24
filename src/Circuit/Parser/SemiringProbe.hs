@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Semiring-weighted interpretation of 'Loop Either' parsers.
+-- | Semiring-weighted interpretation of 'Knot Either' parsers.
 --
 -- This module is a smoke test / probe for the unconstrained circuits core.
 -- It interprets parser syntax built over a local 'Kleisli' wrapper into a
@@ -59,7 +59,6 @@ where
 
 import Circuit qualified as C
 import Circuit.Category (Category, id, (.), (.>))
-import Circuit.Channel (Channel (..), Strength (..), Traced (..))
 import Circuit.Parser (Uncons (..))
 import Circuit.Parser.Matrix (fromLists, starMatrix, toLists)
 import Circuit.Parser.Semiring
@@ -68,6 +67,7 @@ import Circuit.Parser.Semiring
     MinPlus (..),
     Weighted (..),
   )
+import Circuit.Traced (Assoc (..), OuterSwap (..), Strength (..), Trace (..))
 import Control.Arrow (Kleisli (..), runKleisli)
 import Control.Monad (MonadPlus (..), (<=<))
 import Data.Bifunctor (first)
@@ -81,8 +81,8 @@ import NumHask.Algebra.Ring qualified as Ring
 import Prelude hiding (id, (.))
 
 -- ---------------------------------------------------------------------------
--- Local Kleisli wrapper (avoids the overlapping 'Traced Either (Kleisli IO)'
--- instance in the circuits core).
+-- Local Kleisli wrapper (keeps the probe's structural instances local rather
+-- than relying on the core's @K m@ 'Either' family).
 -- ---------------------------------------------------------------------------
 
 -- | A thin wrapper around 'Kleisli' so that this module can supply its own
@@ -93,7 +93,7 @@ instance (Monad m) => Category (PK m) where
   id = PK (Kleisli pure)
   PK (Kleisli f) . PK (Kleisli g) = PK (Kleisli (f <=< g))
 
-instance (Monad m) => Channel Either (PK m) where
+instance (Monad m) => Assoc Either (PK m) where
   assoc =
     PK $
       Kleisli $
@@ -108,7 +108,9 @@ instance (Monad m) => Channel Either (PK m) where
           Left a -> Left (Left a)
           Right (Left b) -> Left (Right b)
           Right (Right c) -> Right c
-  slide =
+
+instance (Monad m) => OuterSwap Either (PK m) where
+  outerSwap =
     PK $
       Kleisli $
         pure . \case
@@ -123,7 +125,7 @@ instance (Monad m) => Strength Either (PK m) where
         Left a -> pure (Left a)
         Right b -> Right <$> f b
 
-instance (Monad m) => Traced Either (PK m) where
+instance (Monad m) => Trace Either (PK m) where
   trace (PK (Kleisli f)) =
     PK $
       Kleisli $
@@ -172,13 +174,13 @@ instance Normalizable (MinPlus Double) where normalize = dupDel
 -- Parser over the Kleisli source
 -- ---------------------------------------------------------------------------
 
--- | Parser syntax over @Loop Either (PK m)@.
+-- | Parser syntax over @Knot Either (PK m)@.
 newtype EqParser m f s a = EqParser
-  { unEqParser :: C.Loop Either (PK m) f (These a f)
+  { unEqParser :: C.Knot Either (PK m) f (These a f)
   }
 
--- | Run a 'Loop' built over the local Kleisli wrapper.
-runLoop :: (Monad m) => C.Loop Either (PK m) x y -> x -> m y
+-- | Run a 'Knot' built over the local Kleisli wrapper.
+runLoop :: (Monad m) => C.Knot Either (PK m) x y -> x -> m y
 runLoop l = runKleisli (unPK (C.run l))
 
 -- | Run a parser in the base monad.
@@ -187,7 +189,7 @@ runEqParser p = runLoop (unEqParser p)
 
 -- | Consume and return the next element, or 'That' if the stream is empty.
 next :: forall m f s. (Monad m, Uncons f s) => EqParser m f s s
-next = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (uncons f)
+next = EqParser $ C.Arr $ PK $ Kleisli $ \f -> pure (uncons f)
 
 -- | Apply a predicate to the result of 'uncons'.
 guardThese :: (s -> Bool) -> f -> These s f -> These s f
@@ -203,7 +205,7 @@ isThat = these (const False) (const True) (\_ _ -> False)
 
 -- | Consume one element if it satisfies the predicate.
 satisfy :: forall m f s. (Monad m, Uncons f s) => (s -> Bool) -> EqParser m f s s
-satisfy p = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (guardThese p f (uncons f))
+satisfy p = EqParser $ C.Arr $ PK $ Kleisli $ \f -> pure (guardThese p f (uncons f))
 
 -- | Match a specific element.
 char :: forall m f s. (Monad m, Uncons f s, Eq s) => s -> EqParser m f s s
@@ -225,7 +227,7 @@ satisfyW ::
   (Uncons f s, Add.Additive r, Eq r) =>
   (s -> r) ->
   EqParser (Weighted r) f s s
-satisfyW w = EqParser $ C.Lift $ PK $ Kleisli $ \f ->
+satisfyW w = EqParser $ C.Arr $ PK $ Kleisli $ \f ->
   Weighted $ case uncons f of
     That _ -> []
     This s -> [(This s, w s) | w s /= Add.zero]
@@ -255,7 +257,7 @@ stringW w = go []
 
 -- | Succeed only at the end of input.
 endOfInput :: forall m f s. (Monad m, Uncons f s) => EqParser m f s ()
-endOfInput = EqParser $ C.Lift $ PK $ Kleisli $ \f ->
+endOfInput = EqParser $ C.Arr $ PK $ Kleisli $ \f ->
   pure $ case uncons @f @s f of
     That _ -> These () f
     _ -> That f
@@ -266,11 +268,11 @@ mapP ::
   (a -> b) ->
   EqParser m f s a ->
   EqParser m f s b
-mapP g (EqParser p) = EqParser (p .> C.Lift (PK (Kleisli (pure . first g))))
+mapP g (EqParser p) = EqParser (p .> C.Arr (PK (Kleisli (pure . first g))))
 
 -- | Lift a pure value into a parser that consumes nothing.
 pureP :: (Monad m) => a -> EqParser m f s a
-pureP a = EqParser $ C.Lift $ PK $ Kleisli $ \f -> pure (These a f)
+pureP a = EqParser $ C.Arr $ PK $ Kleisli $ \f -> pure (These a f)
 
 -- | Sequential composition that threads the stream and pairs the results.
 pairP ::
@@ -279,7 +281,7 @@ pairP ::
   EqParser m f s a ->
   EqParser m f s b ->
   EqParser m f s (a, b)
-pairP (EqParser p) (EqParser q) = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
+pairP (EqParser p) (EqParser q) = EqParser $ C.Arr $ PK $ Kleisli $ \s -> do
   runLoop p s >>= \case
     That s' -> pure (That s')
     This a ->
@@ -301,7 +303,7 @@ bindP ::
   EqParser m f s a ->
   (a -> EqParser m f s b) ->
   EqParser m f s b
-bindP (EqParser m) k = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
+bindP (EqParser m) k = EqParser $ C.Arr $ PK $ Kleisli $ \s -> do
   runLoop m s >>= \case
     That s' -> pure (That s')
     This a -> runLoop (unEqParser (k a)) (nil @f @s)
@@ -309,9 +311,9 @@ bindP (EqParser m) k = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
 
 -- | A parser that always fails without consuming input.
 empty :: (MonadPlus m) => EqParser m f s a
-empty = EqParser $ C.Lift $ PK $ Kleisli $ const mzero
+empty = EqParser $ C.Arr $ PK $ Kleisli $ const mzero
 
--- | Traced choice: collect successes from both branches.
+-- | Trace-based choice: collect successes from both branches.
 --
 -- The branching is expressed with 'mplus', so this works for any
 -- 'MonadPlus' source (in particular the list monad used by
@@ -322,7 +324,7 @@ empty = EqParser $ C.Lift $ PK $ Kleisli $ const mzero
   EqParser m f s a ->
   EqParser m f s a ->
   EqParser m f s a
-EqParser p1 <|> EqParser p2 = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
+EqParser p1 <|> EqParser p2 = EqParser $ C.trace $ C.Arr $ PK $ Kleisli $ \case
   Right s -> do
     res <- runLoop p1 s
     case res of
@@ -342,7 +344,7 @@ many ::
   (MonadPlus m, Uncons f s) =>
   EqParser m f s a ->
   EqParser m f s [a]
-many p = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
+many p = EqParser $ C.trace $ C.Arr $ PK $ Kleisli $ \case
   Right f -> pure (Left (f, []))
   Left (f, acc) ->
     let exit = pure (Right (These (reverse acc) f))
@@ -365,7 +367,7 @@ some p = mapP (uncurry (:)) (pairP p (many p))
 
 -- | Attempt a parser. If it fails with 'That', restore the original stream.
 try :: forall m f s a. (Monad m) => EqParser m f s a -> EqParser m f s a
-try (EqParser p) = EqParser $ C.Lift $ PK $ Kleisli $ \s -> do
+try (EqParser p) = EqParser $ C.Arr $ PK $ Kleisli $ \s -> do
   res <- runLoop p s
   pure $ case res of
     That _ -> That s
@@ -460,7 +462,7 @@ altW ::
   EqParser [] f s a ->
   EqParser [] f s a ->
   EqParser [] f s a
-altW (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
+altW (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Arr $ PK $ Kleisli $ \case
   Right s ->
     let ress = runLoop p1 s
         successes = [res | res <- ress, not (isThat res)]
@@ -480,7 +482,7 @@ altWeighted ::
   EqParser (Weighted r) f s a ->
   EqParser (Weighted r) f s a ->
   EqParser (Weighted r) f s a
-altWeighted (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Lift $ PK $ Kleisli $ \case
+altWeighted (EqParser p1) (EqParser p2) = EqParser $ C.trace $ C.Arr $ PK $ Kleisli $ \case
   Right s ->
     let Weighted ress = runLoop p1 s
         successes = [(res, w) | (res, w) <- ress, not (isThat res)]
@@ -515,8 +517,12 @@ totalWeight = foldr ((Add.+) . snd) Add.zero
 
 -- | Smoke test: count the parses of @"ab" | "a"@ on input @"ab"@.
 --
+-- The result bag is @{("ab", 1), ("a", 1)}@; the list order is the
+-- trace's feedback-before-exit traversal, with the @Left@ fallback edge
+-- handled before the direct 'Right' exits.
+--
 -- >>> demo
--- [(These "ab" "",Count 1),(These "a" "b",Count 1)]
+-- [(These "a" "b",Count 1),(These "ab" "",Count 1)]
 -- Count 2
 demo :: IO ()
 demo = do
@@ -582,11 +588,12 @@ abWeights _ = Add.zero
 -- the respective primitive.
 --
 -- With the test weights @wa = 2@, @wb = 3@ the inside value is 6 and the
--- outside values are 3 and 2.
+-- outside values are 3 and 2.  The list order is the trace's
+-- feedback-before-exit traversal, so the @\"a\"@ parse (reached via the
+-- fallback edge) prints before the @"ab"@ parse.
 --
 -- >>> outsideDemo
--- Dual2 {dualValue = 6.0, dualGradA = 3.0, dualGradB = 2.0}
--- Dual2 {dualValue = 2.0, dualGradA = 1.0, dualGradB = 0.0}
+-- [(These "a" "b",Dual2 {dualValue = 2.0, dualGradA = 1.0, dualGradB = 0.0}),(These "ab" "",Dual2 {dualValue = 6.0, dualGradA = 3.0, dualGradB = 2.0})]
 outsideDemo :: IO ()
 outsideDemo = do
   let p = stringW abWeights "ab" `altWeighted` stringW abWeights "a" :: EqParser (Weighted Dual2) String Char String

@@ -3,15 +3,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | Branching-trace probe for 'Loop Either'.
+-- | Branching-trace probe for 'Knot Either'.
 --
--- The standard 'Traced Either (Kleisli m)' instance iterates: it commits to
+-- The standard 'Trace Either (K m)' instance iterates: it commits to
 -- the first 'Right' result produced by the loop body and discards any
 -- alternatives.  This is exactly why running a parser with 'LogicT' still
 -- returns a singleton list when choices are expressed through the trace
 -- (see "Circuit.Parser").
 --
--- This module defines a small wrapper monad 'BranchingM' and a 'Traced'
+-- This module defines a small wrapper monad 'BranchingM' and a 'Trace'
 -- instance that enumerates /all/ reachable 'Right' exits instead of stopping
 -- at the first one.  It is a probe, not a polished semantics: lawfulness of
 -- a branching trace is intentionally left open.
@@ -38,7 +38,7 @@ module Circuit.Parser.BranchingTraceProbe
 where
 
 import Circuit qualified as C
-import Circuit.Channel (Traced (..))
+import Circuit.Category (K (..), runK)
 import Circuit.Parser
   ( Parser,
     Uncons,
@@ -46,8 +46,8 @@ import Circuit.Parser
     string,
   )
 import Circuit.Parser.LoopAdapter (loopToParser)
+import Circuit.Traced (Trace (..))
 import Control.Applicative (Alternative, empty)
-import Control.Arrow (Kleisli (..))
 import Control.Monad (MonadPlus)
 import Control.Monad.Logic (LogicT, MonadLogic, interleave, msplit, observeAllT)
 import Control.Monad.Trans (MonadTrans)
@@ -61,9 +61,9 @@ newtype BranchingM m a = BranchingM {runBranchingM :: LogicT m a}
 
 -- | Enumerate every 'Right' result reachable by following 'Left' feedback
 -- edges, rather than committing to the first one.
-instance (Monad m) => Traced Either (Kleisli (BranchingM m)) where
-  trace :: forall a b c. Kleisli (BranchingM m) (Either a b) (Either a c) -> Kleisli (BranchingM m) b c
-  trace (Kleisli f) = Kleisli $ go . Right
+instance (Monad m) => Trace Either (K (BranchingM m)) where
+  trace :: forall a b c. K (BranchingM m) (Either a b) (Either a c) -> K (BranchingM m) b c
+  trace (K f) = K $ go . Right
     where
       go :: Either a b -> BranchingM m c
       go x = do
@@ -86,7 +86,7 @@ runBranching p f = observeAllT (runBranchingM (runParser p f))
 
 -- | Run a parser in the naive @LogicT@ base monad and collect every result.
 --
--- The standard 'Loop Either' control structure commits to the first
+-- The standard 'Knot Either' control structure commits to the first
 -- successful branch, so this usually returns a singleton list. It becomes a
 -- list of alternatives only when the parser itself uses the base monad's
 -- nondeterminism. 'runBranching' is the branching-trace fix that enumerates
@@ -108,7 +108,7 @@ altB ::
   Parser (BranchingM m) f s a ->
   Parser (BranchingM m) f s a ->
   Parser (BranchingM m) f s a
-altB p1 p2 = loopToParser $ C.trace $ C.Lift $ Kleisli $ \case
+altB p1 p2 = loopToParser $ C.trace $ C.Arr $ K $ \case
   Right s -> leftSuccesses s `interleave` pure (Left s)
   Left s -> Right <$> runParser p2 s
   where
@@ -125,12 +125,12 @@ altB p1 p2 = loopToParser $ C.trace $ C.Lift $ Kleisli $ \case
 traceDemo :: [Int]
 traceDemo = runIdentity $ observeAllT $ runBranchingM $ go ()
   where
-    body :: Kleisli (BranchingM Identity) (Either () ()) (Either () Int)
-    body = Kleisli $ \case
+    body :: K (BranchingM Identity) (Either () ()) (Either () Int)
+    body = K $ \case
       Right () -> pure (Right 1) `interleave` pure (Left ())
       Left () -> pure (Right 2)
 
-    go = runKleisli $ C.trace body
+    go = runK $ C.trace body
 
 -- | Interactive smoke test for 'altB'.
 --

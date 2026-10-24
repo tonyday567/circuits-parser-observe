@@ -9,8 +9,8 @@
 -- the unified parser.  @LevelsT m a@ is a list of bags of @a@, ordered by the
 -- number of steps needed to reach each outcome.  The 'Alternative' '<|>'
 -- interleaves outcomes at the same level rather than left-biasing, and the
--- 'Traced' instance for @Kleisli (LevelsT m)@ enumerates /all/ reachable
--- 'Right' exits of an @Either@ loop instead of committing to the first one.
+-- 'Trace' instance for @K (LevelsT m)@ enumerates /all/ reachable
+-- 'Right' exits of an @Either@ knot instead of committing to the first one.
 --
 -- The implementation uses the Cayley/Church-encoded representation of
 -- @LevelsT@ (Kidney & Wu, \u00a73.2).  This makes left-nested uses of '<|>'
@@ -45,15 +45,15 @@ module Circuit.Parser.LevelsT
 where
 
 import Circuit qualified as C
-import Circuit.Channel (Traced (..))
+import Circuit.Category (K (..))
 import Circuit.Parser
   ( Parser,
     Uncons,
     runParser,
   )
 import Circuit.Parser.LoopAdapter (loopToParser)
+import Circuit.Traced (Trace (..))
 import Control.Applicative (Alternative (..))
-import Control.Arrow (Kleisli (..))
 import Control.Category ((.))
 import Control.Monad (MonadPlus, ap, join)
 import Control.Monad.Trans (MonadTrans (..))
@@ -181,8 +181,8 @@ msplitLevelsT xs = runLevelsT xs go (pure Nothing)
 
 -- | Enumerate every 'Right' result reachable by following 'Left' feedback
 -- edges, interleaving the search breadth-first via 'LevelsT'.
-instance (Monad m) => Traced Either (Kleisli (LevelsT m)) where
-  trace (Kleisli f) = Kleisli (go . Right)
+instance (Monad m) => Trace Either (K (LevelsT m)) where
+  trace (K f) = K (go . Right)
     where
       go x = do
         mb <- lift (msplitLevelsT (f x))
@@ -205,7 +205,7 @@ altLevels ::
   Parser (LevelsT m) f s a ->
   Parser (LevelsT m) f s a ->
   Parser (LevelsT m) f s a
-altLevels p1 p2 = loopToParser $ C.trace $ C.Lift $ Kleisli $ \case
+altLevels p1 p2 = loopToParser $ C.trace $ C.Arr $ K $ \case
   Right s -> leftSuccesses s `altLevelsT` pure (Left s)
   Left s -> Right <$> runParser p2 s
   where

@@ -8,9 +8,9 @@
 -- summing over all paths through a cyclic choice graph ('SemiringProbe').  The
 -- @circuits-stats@ package contains the same phenomenon from the coalgebra side:
 --
--- * 'Circuit.Stats.Trace' gives a lazy @Traced (,) Process@ instance.
--- * 'Circuit.Stats.Diff' gives reverse-mode AD through a Process scan via
---   'DiffProcess'.
+-- * 'Circuit.Machine' gives a lazy @Trace (,) (MooreT (,) (->))@ instance,
+--   so a 'MooreT' machine can be fed back as a @(,)-knot@.
+-- * 'Circuit.Stats.Diff' gives reverse-mode AD through a 'DiffProcess' scan.
 --
 -- This probe shows that a tiny parser can be written as a state machine, and
 -- that the machine's parameter gradients coincide with the outside values
@@ -20,12 +20,13 @@
 --
 -- === Trace-divergence correspondence
 --
--- 'Circuit.Stats.Trace' diverges for strict numeric accumulators (moving
--- average) because the per-step fixed point @a_t = r * a_t + x_t@ has no lazy
--- solution.  That is the same obstruction as the naive @Traced Either@ parser
--- committing to the first successful branch: some feedbacks do not admit the
--- obvious trace.  The replacements are 'DiffProcess''s reverse step and
--- 'SemiringProbe.traceCyclic''s Kleene closure respectively.
+-- The machine-side @Trace (,)@ diverges for strict numeric accumulators
+-- (moving average) because the per-step fixed point @a_t = r * a_t + x_t@ has
+-- no lazy solution.  That is the same obstruction as the naive
+-- @Trace Either (K m)@ parser committing to the first successful branch:
+-- some feedbacks do not admit the obvious trace.  The replacements are
+-- 'DiffProcess''s reverse step and 'SemiringProbe.traceCyclic''s Kleene
+-- closure respectively.
 module Circuit.Parser.ProcessProbe
   ( -- * Token wrapper for non-differentiable inputs
     Token (..),
@@ -50,8 +51,8 @@ module Circuit.Parser.ProcessProbe
   )
 where
 
-import Circuit.Diff (Diff, Diff', pattern Diff)
-import Circuit.Stats (Process (..))
+import Circuit.Diff (pattern Diff)
+import Circuit.Stats (MooreT, moore)
 import Circuit.Stats.Diff (DiffProcess (..), diffFold, diffScan)
 import NumHask.Algebra.Additive qualified as Add
 import NumHask.Algebra.Multiplicative qualified as Mul
@@ -89,8 +90,8 @@ instance Add.Additive Token where
 --
 -- >>> fold abProcess "aab"
 -- Just Nothing
-abProcess :: Process Char (Maybe String)
-abProcess = Process inject step id
+abProcess :: MooreT (,) (->) Char (Maybe String)
+abProcess = moore inject step id
   where
     inject 'a' = Just "a"
     inject _ = Nothing
